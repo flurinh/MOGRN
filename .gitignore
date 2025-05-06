@@ -6,3 +6,5 @@ structures
 yaml_configs
 opsin_output
 all_structs_old
+__pycache__
+property
