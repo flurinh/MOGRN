@@ -17,7 +17,7 @@ from collections import Counter
 import matplotlib.patches as mpatches
 
 # Import global color scheme and visualization utilities
-from projects.opsin_analysis.opsin_color_scheme import (
+from opsin_color_scheme import (
     OPSIN_COLORS, RMSD_CMAP, DIVERGING_CMAP, RMSD_DISCRETE_CMAP, RMSD_BOUNDS,
     HELIX_COLORS, HELIX_COLORS_STR, HELIX_COLORS_LIST, get_group_colors)
 

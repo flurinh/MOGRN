@@ -10,6 +10,8 @@ from scipy.spatial.distance import cdist
 from protos.processing.structure.struct_alignment import get_structure_alignment
 from Bio.PDB.qcprot import QCPSuperimposer
 from tqdm import tqdm
+import pickle
+import hashlib
 
 # Import error_analysis module from the local package
 from common_utils import compute_retinal_mean_closest_distance
@@ -94,9 +96,6 @@ def compute_all_vs_all_rmsd_improved(structures, align_to=None, subset='CA', cha
                - pdb_list: List of structure IDs
                - alignment_paths: Dictionary mapping structure pairs to alignment information
     """
-    import os
-    import pickle
-    import hashlib
     
     # Prepare the list of structures
     structure_ids = list(structures.keys())
@@ -314,280 +313,318 @@ def compute_all_vs_all_rmsd_improved(structures, align_to=None, subset='CA', cha
     # Return the DataFrame, matrix, structure IDs, and alignment paths
     return rmsd_df, rmsd_matrix, structure_ids, alignment_paths
 
+
+import numpy as np
+import pandas as pd
+from tqdm import tqdm
+
+
+# Assume get_structure_alignment (which uses CEalign),
+# calculate_min_distances, and compute_retinal_mean_closest_distance
+# are correctly defined and imported in your environment.
+
 def calculate_binding_pocket_rmsd_for_pairs(mapping_dict, exp_processor, pred_processor, pocket_def=None, cutoff=6.0,
                                             distance_cutoff=6.0, position_tolerance=2.0, window_size=20, max_gap=4,
                                             retinal_name='RET'):
     """
     Calculate binding pocket RMSD between pairs of experimental and predicted structures.
-    
-    Args:
-        mapping_dict: Dictionary mapping experimental structure IDs to predicted structure IDs
-        exp_processor: CifBaseProcessor containing experimental structures
-        pred_processor: CifBaseProcessor containing predicted structures
-        pocket_def: Optional predefined pocket residues
-        cutoff: Distance cutoff for binding pocket definition (same as distance_cutoff)
-        distance_cutoff: Distance cutoff for binding pocket definition
-        position_tolerance: Tolerance for position matching
-        window_size: Window size for smoothing
-        max_gap: Maximum gap size
-        retinal_name: Name of the retinal ligand ('RET' or 'LIG')
-        
-    Returns:
-        dict: Dictionary of RMSD results for each structure pair
-        
-    Process Steps:
-        1. Filter CA atoms for overall alignment
-        2. Align the structures using CA atoms 
-        3. Apply rotation matrix to full structure including retinal
-        4. Calculate RMSD for:
-           a. Overall CA atoms
-           b. Binding pocket atoms (residues within cutoff distance of retinal)
-           c. Retinal atoms
+    Uses CEalign path for pocket residue mapping. Retinal RMSD uses original logic.
     """
-    # Use distance_cutoff if provided, otherwise use cutoff
     effective_cutoff = distance_cutoff if distance_cutoff is not None else cutoff
-    
-    # Initialize results dictionary
     results = {}
-    
-    # Setup progress bar for processing structure pairs
+
     print(f"Processing {len(mapping_dict)} structure pairs for binding pocket RMSD...")
-    
-    # Process each experimental-predicted structure pair from the mapping with progress bar
+
     for exp_id, mapping_info in tqdm(mapping_dict.items(), desc="Binding Pocket RMSD", unit="pairs"):
-        # Check if mapping is in new nested format or old direct format
         if isinstance(mapping_info, dict) and 'predicted' in mapping_info:
-            # New format - nested dictionary
             pred_id = mapping_info['predicted']
         else:
-            # Old format - direct mapping
             pred_id = mapping_info
-            
+
         print(f"[INFO] Processing {exp_id} <-> {pred_id} pair")
-        
-        # Get experimental structure data
-        exp_data = exp_processor.data[exp_processor.data['pdb_id'] == exp_id].copy()
-        if exp_data.empty:
-            print(f"[WARNING] No experimental structure data found for {exp_id}")
+
+        exp_data_full = exp_processor.data[exp_processor.data['pdb_id'] == exp_id]
+        if exp_data_full.empty:
+            results[exp_id] = {'error': f'No exp data for {exp_id}'};
             continue
-        
-        # Get predicted structure data
-        pred_data = pred_processor.data[pred_processor.data['pdb_id'] == pred_id].copy()
-        if pred_data.empty:
-            print(f"[WARNING] No predicted structure data found for {pred_id}")
+        pred_data_full = pred_processor.data[pred_processor.data['pdb_id'] == pred_id]
+        if pred_data_full.empty:
+            results[exp_id] = {'error': f'No pred data for {pred_id}'};
             continue
-        
-        # These are already DataFrames from the processor, not dictionaries
-        exp_df = exp_data
-        pred_df = pred_data
-        
-        #############################################################
-        # STEP 1: Extract retinal and validate it exists in both structures
-        #############################################################
-        
-        # Find retinal in experimental structure
-        exp_ret = exp_df[exp_df['res_name3l'] == retinal_name]
-        if exp_ret.empty:
-            results[exp_id] = {'error': f'No retinal ({retinal_name}) found in experimental structure'}
+
+        exp_df = exp_data_full.copy()
+        # Keep a pristine copy of pred_df for retinal RMSD, as it uses original pred retinal coords then transforms them
+        pred_df_original_for_retinal_rmsd = pred_data_full.copy()
+        # This copy will be transformed for pocket RMSD calculation
+        pred_df_for_pocket_alignment = pred_data_full.copy()
+
+        coord_cols = ['x', 'y', 'z']
+        for df_to_clean in [exp_df, pred_df_original_for_retinal_rmsd, pred_df_for_pocket_alignment]:
+            for col in coord_cols:
+                df_to_clean[col] = pd.to_numeric(df_to_clean[col], errors='coerce')
+            df_to_clean.dropna(subset=coord_cols, inplace=True)
+
+        if exp_df.empty or pred_df_original_for_retinal_rmsd.empty or pred_df_for_pocket_alignment.empty:
+            results[exp_id] = {'error': 'Data empty after coord cleaning'};
             continue
-        
-        # Find retinal in predicted structure - also check for 'LIG' if using 'RET'
-        pred_ret = pred_df[pred_df['res_name3l'] == retinal_name]
-        if pred_ret.empty and retinal_name == 'RET':
-            # Try with 'LIG' as some prediction models use this name
-            pred_ret = pred_df[pred_df['res_name3l'] == 'LIG']
-            # Rename 'LIG' to 'RET' for consistency
-            if not pred_ret.empty:
-                pred_df.loc[pred_df['res_name3l'] == 'LIG', 'res_name3l'] = 'RET'
-                pred_ret = pred_df[pred_df['res_name3l'] == 'RET']
-                
-        if pred_ret.empty:
-            results[exp_id] = {'error': f'No retinal ({retinal_name} or LIG) found in predicted structure'}
+
+        # STEP 1: Extract retinal DataFrames from UNTRANSFORMED DataFrames
+        # Experimental retinal (from original exp_df)
+        exp_ret_df_step1 = exp_df[exp_df['res_name3l'] == retinal_name]
+        if exp_ret_df_step1.empty:
+            results[exp_id] = {'error': f'No exp retinal ({retinal_name})'};
             continue
-        
-        #############################################################
-        # STEP 2: Define binding pocket residues
-        #############################################################
-        
-        if pocket_def is None:
-            # Extract CA atoms from experimental structure
-            try:
-                exp_ca = exp_df[exp_df['res_atom_name'] == 'CA']
-            except TypeError:
-                print("[DEBUG] Using string conversion for CA atom selection")
-                exp_ca = exp_df[exp_df['res_atom_name'].astype(str) == 'CA']
-            
-            # Calculate distances from each CA atom to the nearest retinal atom
-            dist_to_ret = calculate_min_distances(
-                exp_ca[['x', 'y', 'z']].astype(float).values,
-                exp_ret[['x', 'y', 'z']].astype(float).values
-            )
-            
-            # Ensure dist_to_ret is properly handled - it may be a list or numpy array
-            if isinstance(dist_to_ret, list):
-                dist_to_ret = np.array(dist_to_ret)
-            
-            # Define pocket as residues within effective_cutoff distance
-            pocket_indices = [i for i, dist in enumerate(dist_to_ret) if dist <= effective_cutoff]
-            pocket_residues = exp_ca.iloc[pocket_indices]['auth_seq_id'].tolist()
-            print(f"[INFO] Identified {len(pocket_residues)} pocket residues within {effective_cutoff}Å of retinal")
-        else:
-            pocket_residues = pocket_def
-            print(f"[INFO] Using {len(pocket_residues)} predefined pocket residues")
-        
-        #############################################################
+
+        # Predicted retinal (from original, untransformed pred_df_original_for_retinal_rmsd)
+        pred_ret_df_step1 = pred_df_original_for_retinal_rmsd[
+            pred_df_original_for_retinal_rmsd['res_name3l'] == retinal_name]
+        if pred_ret_df_step1.empty and retinal_name == 'RET':
+            pred_ret_df_step1 = pred_df_original_for_retinal_rmsd[
+                pred_df_original_for_retinal_rmsd['res_name3l'] == 'LIG']
+            if not pred_ret_df_step1.empty:
+                # If renaming, ensure all pred_df copies are consistent if 'LIG' might be used elsewhere
+                pred_df_original_for_retinal_rmsd.loc[
+                    pred_df_original_for_retinal_rmsd['res_name3l'] == 'LIG', 'res_name3l'] = 'RET'
+                pred_df_for_pocket_alignment.loc[
+                    pred_df_for_pocket_alignment['res_name3l'] == 'LIG', 'res_name3l'] = 'RET'
+                pred_ret_df_step1 = pred_df_original_for_retinal_rmsd[
+                    pred_df_original_for_retinal_rmsd['res_name3l'] == 'RET']
+
+        if pred_ret_df_step1.empty:  # This is the untransformed predicted retinal DataFrame
+            results[exp_id] = {'error': f'No pred retinal ({retinal_name} or LIG)'};
+            continue
+
+        # STEP 2: Define EXPERIMENTAL binding pocket residues
+        exp_protein_ca_df_for_pocket = exp_df[
+            (exp_df['res_atom_name'].astype(str) == 'CA') & (exp_df['res_name3l'] != retinal_name)]
+        if exp_protein_ca_df_for_pocket.empty:
+            results[exp_id] = {'error': 'No exp protein CAs for pocket def'};
+            continue
+
+        exp_pocket_definition_ca_coords = exp_protein_ca_df_for_pocket[['x', 'y', 'z']].values.astype(float)
+        exp_ret_coords_for_pocket_def = exp_ret_df_step1[['x', 'y', 'z']].values.astype(float)
+
+        if exp_pocket_definition_ca_coords.size == 0 or exp_ret_coords_for_pocket_def.size == 0:
+            results[exp_id] = {'error': 'Empty coords for pocket def'};
+            continue
+
+        dist_to_ret = calculate_min_distances(exp_pocket_definition_ca_coords, exp_ret_coords_for_pocket_def)
+        if not isinstance(dist_to_ret, np.ndarray): dist_to_ret = np.array(dist_to_ret)
+
+        pocket_ca_indices_in_exp_protein_ca_df = np.where(dist_to_ret <= effective_cutoff)[0]
+        experimental_pocket_auth_ids = exp_protein_ca_df_for_pocket.iloc[pocket_ca_indices_in_exp_protein_ca_df][
+            'auth_seq_id'].unique().tolist()
+
+        if pocket_def is not None:
+            experimental_pocket_auth_ids = pocket_def
+
+        if not experimental_pocket_auth_ids:
+            print(f"[WARNING] No pocket residues defined for {exp_id}. Pocket RMSD will be NaN.")
+        print(f"[INFO] Identified {len(experimental_pocket_auth_ids)} experimental pocket residues for {exp_id}")
+
         # STEP 3: Extract CA atoms for overall alignment
-        #############################################################
-        
-        # Extract CA atoms for alignment
-        try:
-            exp_ca = exp_df[exp_df['res_atom_name'] == 'CA']
-            pred_ca = pred_df[pred_df['res_atom_name'] == 'CA']
-        except TypeError:
-            # Fall back to string conversion for atom selection
-            print("[DEBUG] Using string conversion for CA atom selection")
-            exp_ca = exp_df[exp_df['res_atom_name'].astype(str) == 'CA']
-            pred_ca = pred_df[pred_df['res_atom_name'].astype(str) == 'CA']
-        
-        if exp_ca.empty or pred_ca.empty:
-            results[exp_id] = {'error': 'Could not find CA atoms for alignment'}
+        # These are the DataFrames from which coordinates for CEalign will be extracted
+        exp_ca_for_align_df = exp_df[
+            (exp_df['res_atom_name'].astype(str) == 'CA') & (exp_df['res_name3l'] != retinal_name)]
+        # Use the pred_df copy that will be transformed for pocket analysis
+        pred_ca_for_align_df = pred_df_for_pocket_alignment[(pred_df_for_pocket_alignment['res_name3l'] != 'RET') &
+                                                            (pred_df_for_pocket_alignment['res_atom_name'].astype(
+                                                                str) == 'CA')]
+
+        if exp_ca_for_align_df.empty or pred_ca_for_align_df.empty:
+            results[exp_id] = {'error': 'No CAs for alignment'};
             continue
-            
-        print(f"[INFO] Found {len(exp_ca)} CA atoms in experimental structure, {len(pred_ca)} in predicted structure")
-        
-        #############################################################
+
+        print(
+            f"[INFO] Using {len(exp_ca_for_align_df)} CAs from exp and {len(pred_ca_for_align_df)} CAs from pred for CEalign input.")
+
         # STEP 4: Align structures based on CA atoms
-        #############################################################
-        
         try:
-            # Extract coordinates of CA atoms
-            exp_ca_coords = exp_ca[['x', 'y', 'z']].astype(float).values
-            pred_ca_coords = pred_ca[['x', 'y', 'z']].astype(float).values
-            
-            # Perform alignment and get rotation matrix and translation vector
-            R, t, _, overall_ca_rmsd = get_structure_alignment(exp_ca_coords, pred_ca_coords) # (reference, query) input
-            print(f"[INFO] Overall CA RMSD: {overall_ca_rmsd:.3f}Å")
-            
-            # Apply transformation to entire predicted structure
-            pred_coords = pred_df[['x', 'y', 'z']].astype(float).values
-            pred_df[['x', 'y', 'z']] = np.dot(pred_coords, R) + t
-            
-            #############################################################
-            # STEP 5: Calculate binding pocket RMSD
-            #############################################################
-            
-            # Calculate RMSD for binding pocket residues (all atoms)
-            pocket_rmsd_sum = 0
+            exp_ca_coords_for_cealign = exp_ca_for_align_df[['x', 'y', 'z']].astype(float).values
+            pred_ca_coords_for_cealign = pred_ca_for_align_df[['x', 'y', 'z']].astype(float).values
+
+            # get_structure_alignment now uses CEalign and returns path indices
+            # The overall_ca_rmsd from this is based on QCP of the CEalign path.
+            R, t, alignment_path_indices, overall_ca_rmsd = get_structure_alignment(
+                exp_ca_coords_for_cealign, pred_ca_coords_for_cealign,
+                window_size=8, max_gap=30  # CEalign specific params
+            )
+            print(f"[INFO] Overall CA RMSD (CEalign path + QCP): {overall_ca_rmsd:.3f}Å")
+
+            # Apply transformation to pred_df_for_pocket_alignment ONCE. This df is used for pocket RMSD.
+            pred_all_atom_coords_original_for_pocket = pred_df_for_pocket_alignment[['x', 'y', 'z']].values.astype(
+                float)
+            pred_df_for_pocket_alignment[['x', 'y', 'z']] = np.dot(pred_all_atom_coords_original_for_pocket, R) + t
+
+            # Map experimental pocket residues to predicted ones using CEalign path
+            pocket_residue_pairs = []
+            if alignment_path_indices and len(alignment_path_indices) == 2 and \
+                    len(alignment_path_indices[0]) > 0 and len(alignment_path_indices[1]) > 0:  # Check path validity
+                exp_path_indices, pred_path_indices = alignment_path_indices
+
+                # Create a set of already mapped experimental pocket auth_ids to avoid redundant processing
+                # if multiple CAs of the same experimental residue map to the predicted structure.
+                mapped_exp_pocket_ids_in_path = set()
+
+                for exp_pocket_auth_id_current in experimental_pocket_auth_ids:
+                    if exp_pocket_auth_id_current in mapped_exp_pocket_ids_in_path:
+                        continue  # Already found a mapping for this exp pocket residue
+
+                    for i in range(len(exp_path_indices)):
+                        exp_ca_path_idx = exp_path_indices[i]
+                        # Check bounds, as iloc can fail if index is out of bounds
+                        if exp_ca_path_idx < len(exp_ca_for_align_df):
+                            auth_id_of_exp_ca_in_path = exp_ca_for_align_df.iloc[exp_ca_path_idx]['auth_seq_id']
+
+                            if auth_id_of_exp_ca_in_path == exp_pocket_auth_id_current:
+                                pred_ca_path_idx = pred_path_indices[i]
+                                if pred_ca_path_idx < len(pred_ca_for_align_df):
+                                    auth_id_of_pred_ca_in_path = pred_ca_for_align_df.iloc[pred_ca_path_idx][
+                                        'auth_seq_id']
+                                    pocket_residue_pairs.append({
+                                        'exp_auth_id': exp_pocket_auth_id_current,
+                                        'pred_auth_id': auth_id_of_pred_ca_in_path
+                                    })
+                                    mapped_exp_pocket_ids_in_path.add(exp_pocket_auth_id_current)
+                                    break  # Found mapping for this exp_pocket_auth_id_current
+            else:
+                print(f"[WARNING] CEalign did not return a valid or non-empty path for {exp_id} <-> {pred_id}.")
+
+            # Ensure uniqueness of (exp_auth_id, pred_auth_id) pairs if one exp maps to multiple segments of pred
+            # or vice-versa due to CEalign behavior (though less common for this simple mapping)
+            if pocket_residue_pairs:
+                unique_pairs_tuples = sorted(list(set(
+                    (pair['exp_auth_id'], pair['pred_auth_id']) for pair in pocket_residue_pairs
+                )))
+                pocket_residue_pairs = [{'exp_auth_id': ep[0], 'pred_auth_id': ep[1]} for ep in unique_pairs_tuples]
+
+            print(
+                f"[INFO] Mapped {len(experimental_pocket_auth_ids)} exp pocket residues to {len(pocket_residue_pairs)} pred pocket residues via alignment path.")
+
+            # STEP 5: Calculate binding pocket RMSD using mapped pairs and transformed pred_df_for_pocket_alignment
+            pocket_rmsd_sum_sq = 0  # Changed from pocket_rmsd_sum to reflect squared sum
             pocket_atom_count = 0
             per_residue_rmsd = {}
-            
-            for res_id in pocket_residues:
-                # Extract all atoms for this residue from experimental structure
-                exp_res = exp_df[exp_df['auth_seq_id'] == res_id]
-                if exp_res.empty:
+
+            if not pocket_residue_pairs:
+                print(f"[WARNING] No pocket residue pairs found after alignment path mapping for {exp_id}.")
+
+            for pair in pocket_residue_pairs:
+                exp_res_id = pair['exp_auth_id']
+                pred_res_id = pair['pred_auth_id']
+
+                exp_res_df_current = exp_df[exp_df['auth_seq_id'] == exp_res_id]
+                # pred_res_df_current is from the ALREADY GLOBALLY ALIGNED pred_df_for_pocket_alignment
+                pred_res_df_current = pred_df_for_pocket_alignment[
+                    pred_df_for_pocket_alignment['auth_seq_id'] == pred_res_id]
+
+                if exp_res_df_current.empty or pred_res_df_current.empty:
                     continue
-                
-                # Extract corresponding residue atoms from predicted structure
-                pred_res = pred_df[pred_df['auth_seq_id'] == res_id]
-                if pred_res.empty:
-                    continue
-                
-                # Match atoms by name and calculate distances
-                matched_atoms = []
-                
-                for atom_name in exp_res['res_atom_name'].unique():
-                    exp_atom = exp_res[exp_res['res_atom_name'] == atom_name]
-                    pred_atom = pred_res[pred_res['res_atom_name'] == atom_name]
-                    
-                    if not exp_atom.empty and not pred_atom.empty:
-                        # Get experimental atom coordinates
-                        exp_coords = exp_atom[['x', 'y', 'z']].astype(float).values[0]
-                        
-                        # Get predicted atom original coordinates
-                        pred_atom_coords = pred_atom[['x', 'y', 'z']].astype(float).values[0]
-                        
-                        # Apply rotation and translation to predicted atom coordinates
-                        aligned_pred_coords = np.dot(pred_atom_coords.reshape(1, 3), R.T) + t
-                        aligned_pred_coords = aligned_pred_coords[0]  # Reshape to 1D array
-                        
-                        # Calculate distance
-                        dist = np.sqrt(np.sum((exp_coords - aligned_pred_coords) ** 2))
-                        matched_atoms.append((atom_name, dist, exp_coords, aligned_pred_coords))
-                        
-                        # Add to overall binding pocket RMSD sum
-                        pocket_rmsd_sum += dist ** 2
+
+                current_res_matched_atoms = []  # Use for per-residue RMSD calculation
+                # Match atoms by name within this STRUCTURALLY ALIGNED pair of residues
+                # This loop is from your original working binding pocket RMSD logic
+                for atom_name in exp_res_df_current['res_atom_name'].unique():
+                    exp_atom_df = exp_res_df_current[exp_res_df_current['res_atom_name'] == atom_name]
+                    pred_atom_df = pred_res_df_current[pred_res_df_current['res_atom_name'] == atom_name]
+
+                    if not exp_atom_df.empty and not pred_atom_df.empty:
+                        exp_coords_atom = exp_atom_df[['x', 'y', 'z']].astype(float).values[0]
+                        # These are from the globally aligned pred_df_for_pocket_alignment
+                        pred_coords_atom_for_comparison = pred_atom_df[['x', 'y', 'z']].astype(float).values[0]
+
+                        dist = np.sqrt(np.sum((exp_coords_atom - pred_coords_atom_for_comparison) ** 2))
+                        current_res_matched_atoms.append(
+                            (atom_name, dist, exp_coords_atom, pred_coords_atom_for_comparison))
+
+                        pocket_rmsd_sum_sq += dist ** 2  # Sum of squared distances
                         pocket_atom_count += 1
-                
-                # Calculate RMSD for this residue
-                if matched_atoms:
-                    # Store error details for each atom
+
+                if current_res_matched_atoms:
                     atom_errors = {}
-                    for atom_name, dist, exp_coords, aligned_pred_coords in matched_atoms:
-                        atom_errors[atom_name] = {
-                            'distance': dist,
-                            'error_x': abs(exp_coords[0] - aligned_pred_coords[0]),
-                            'error_y': abs(exp_coords[1] - aligned_pred_coords[1]),
-                            'error_z': abs(exp_coords[2] - aligned_pred_coords[2])
+                    for atom_name_loop, dist_loop, exp_coords_loop, aligned_pred_coords_loop in current_res_matched_atoms:
+                        atom_errors[atom_name_loop] = {
+                            'distance': dist_loop,
+                            'error_x': abs(exp_coords_loop[0] - aligned_pred_coords_loop[0]),
+                            'error_y': abs(exp_coords_loop[1] - aligned_pred_coords_loop[1]),
+                            'error_z': abs(exp_coords_loop[2] - aligned_pred_coords_loop[2])
                         }
-                    
-                    # Calculate RMSD for this residue
-                    res_rmsd = np.sqrt(np.mean([d ** 2 for _, d, _, _ in matched_atoms]))
-                    res_type = exp_res['res_name3l'].iloc[0]
-                    
-                    # Store per-residue RMSD information
-                    per_residue_rmsd[res_id] = {
-                        'rmsd': res_rmsd,
-                        'res_type': res_type,
-                        'atom_count': len(matched_atoms),
+                    res_rmsd_val = np.sqrt(np.mean([d ** 2 for _, d, _, _ in current_res_matched_atoms]))
+                    per_residue_rmsd[f"{exp_res_id}(exp)-{pred_res_id}(pred)"] = {
+                        'rmsd': res_rmsd_val,
+                        'res_type_exp': exp_res_df_current['res_name3l'].iloc[0],
+                        'res_type_pred': pred_res_df_current['res_name3l'].iloc[0],  # if different due to path
+                        'atom_count': len(current_res_matched_atoms),
                         'atom_errors': atom_errors
                     }
-            
-            # Calculate overall binding pocket RMSD
-            if pocket_atom_count > 0:
-                binding_pocket_rmsd = np.sqrt(pocket_rmsd_sum / pocket_atom_count)
-                print(f"[INFO] Binding pocket RMSD: {binding_pocket_rmsd:.3f}Å (based on {pocket_atom_count} atoms)")
+
+            binding_pocket_rmsd = np.sqrt(pocket_rmsd_sum_sq / pocket_atom_count) if pocket_atom_count > 0 else np.nan
+            print(
+                f"[INFO] Binding pocket RMSD (path aligned): {binding_pocket_rmsd:.3f}Å (based on {pocket_atom_count} atoms)")
+
+            #############################################################
+            # STEP 6: Calculate retinal RMSD (Reverted to original working logic)
+            #############################################################
+
+            # Experimental retinal coordinates (from original exp_df via exp_ret_df_step1)
+            exp_ret_coords = exp_ret_df_step1[['x', 'y', 'z']].astype(float).values
+
+            # Predicted retinal coordinates (from original UNTRANSFORMED pred_df_original_for_retinal_rmsd via pred_ret_df_step1)
+            pred_ret_coords_original_untransformed = pred_ret_df_step1[['x', 'y', 'z']].astype(float).values
+
+            retinal_rmsd = np.nan  # Initialize
+            if exp_ret_coords.shape[0] > 0 and pred_ret_coords_original_untransformed.shape[0] > 0:
+                # Apply the global R and t (from CA alignment) to these specific original predicted retinal coordinates
+                aligned_pred_ret_coords_for_rmsd = np.dot(pred_ret_coords_original_untransformed, R) + t
+
+                try:
+                    retinal_rmsd = compute_retinal_mean_closest_distance(
+                        exp_ret_coords,
+                        aligned_pred_ret_coords_for_rmsd  # Use the explicitly transformed retinal coords
+                    )
+                except Exception as e_cr_rmsd:
+                    print(f"[ERROR] compute_retinal_mean_closest_distance failed for {exp_id}: {e_cr_rmsd}")
+                    retinal_rmsd = np.nan
             else:
-                binding_pocket_rmsd = np.nan
-                print(f"[WARNING] Could not calculate binding pocket RMSD - no matching atoms")
-            
-            #############################################################
-            # STEP 6: Calculate retinal RMSD
-            #############################################################
-            
-            # Extract coordinates
-            pred_ret_coords = pred_ret[['x', 'y', 'z']].astype(float).values
-            exp_ret_coords = exp_ret[['x', 'y', 'z']].astype(float).values
-
-            # Apply alignment to predicted retinal coordinates
-            aligned_pred_ret_coords = np.dot(pred_ret_coords, R) + t
-
-            # Calculate mean closest distance between retinal atoms
-            retinal_rmsd = compute_retinal_mean_closest_distance(exp_ret_coords, aligned_pred_ret_coords)
+                print(
+                    f"[WARNING] Could not compute retinal RMSD for {exp_id} due to empty coordinate arrays for retinal.")
             print(f"[INFO] Retinal RMSD: {retinal_rmsd:.3f}Å")
-            
+
             #############################################################
             # STEP 7: Store all results
             #############################################################
-            
             results[exp_id] = {
                 'backbone_rmsd': overall_ca_rmsd,
                 'overall_pocket_rmsd': binding_pocket_rmsd,
                 'retinal_rmsd': retinal_rmsd,
                 'per_residue_rmsd': per_residue_rmsd,
-                'pocket_residues': pocket_residues,
-                # Add rotation matrix and translation vector for reference
+                'experimental_pocket_auth_ids': experimental_pocket_auth_ids,
+                'mapped_pocket_residue_pairs': pocket_residue_pairs,
                 'alignment': {
                     'rotation': R.tolist(),
-                    'translation': t.tolist()
+                    'translation': t.tolist(),
+                    'cealign_path_indices': {
+                        'exp_indices': alignment_path_indices[0].tolist() if alignment_path_indices and isinstance(
+                            alignment_path_indices[0], np.ndarray) else (
+                            list(alignment_path_indices[0]) if alignment_path_indices and alignment_path_indices[
+                                0] is not None else []),
+                        'pred_indices': alignment_path_indices[1].tolist() if alignment_path_indices and isinstance(
+                            alignment_path_indices[1], np.ndarray) else (
+                            list(alignment_path_indices[1]) if alignment_path_indices and alignment_path_indices[
+                                1] is not None else [])
+                    } if alignment_path_indices and len(alignment_path_indices) == 2 else None
                 }
             }
-        
+
+        except RuntimeError as re:
+            print(f"[ERROR] Alignment runtime error for {exp_id} <-> {pred_id}: {str(re)}")
+            results[exp_id] = {'error': f'Alignment failed: {str(re)}'}
         except Exception as e:
             import traceback
             print(f"[ERROR] Failed to process {exp_id} and {pred_id}: {str(e)}")
             traceback.print_exc()
             results[exp_id] = {'error': f'Processing failed: {str(e)}'}
-    
+
     print(f"[INFO] Completed binding pocket RMSD calculation for {len(results)} structure pairs")
     return results
 

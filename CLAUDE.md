@@ -1,5 +1,7 @@
 # CLAUDE.md - Protos Framework Reference
 
+**Project Workflow**: For a complete explanation of the project's workflow and how to run each step, see the `GUIDE.md` file. It provides step-by-step instructions for executing the analysis pipeline.
+
 ## ProtosPaths System
 
 ProtosPaths handles path management throughout the Protos framework:
@@ -93,3 +95,7 @@ dataset = processor.create_standard_dataset(
    - ProtosPaths resolves file paths
    - DatasetManager handles dataset operations
    - BaseProcessor manages format conversion and error handling
+
+## Project Documentation
+
+- **GUIDE.md**: Contains the complete workflow explanation, including how to run each script and what each script does

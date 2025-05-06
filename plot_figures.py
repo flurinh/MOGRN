@@ -13,7 +13,7 @@ import argparse
 from pathlib import Path
 
 # Import visualization functions
-from projects.opsin_analysis.visualization_functions import (
+from visualization_functions import (
     # RMSD Visualizations
     visualize_rmsd_heatmap,
     create_and_visualize_similarity_tree,
@@ -37,7 +37,7 @@ from projects.opsin_analysis.visualization_functions import (
 )
 
 # Import the color scheme tools
-from projects.opsin_analysis.opsin_color_scheme import get_group_colors
+from opsin_color_scheme import get_group_colors
 
 def load_data(input_dir, output_dir=None, chain_id='A'):
     """
@@ -485,7 +485,7 @@ def generate_summary_csv(data, output_dir):
         domains.add(row[2])    # Index 2 is domain
     
     # Get color assignments
-    from projects.opsin_analysis.opsin_color_scheme import get_group_colors
+    from opsin_color_scheme import (get_group_colors)
     function_colors = get_group_colors(sorted(functions))
     domain_colors = get_group_colors(sorted(domains))
     
@@ -523,7 +523,7 @@ def generate_plots(data, output_dir):
     # Generate Overview plot
     print("Generating overview plot...")
     try:
-        from projects.opsin_analysis.visualization_plots import create_overview_plot
+        from visualization_plots import create_overview_plot
         create_overview_plot(data, os.path.join(output_dir, 'opsin_overview.png'))
     except Exception as e:
         print(f"Error generating overview plot: {e}")
@@ -963,9 +963,9 @@ def generate_plots(data, output_dir):
 
 def main():
     parser = argparse.ArgumentParser(description='Generate plots for opsin analysis')
-    parser.add_argument('--input-dir', '-i', type=str, default='projects/opsin_analysis/opsin_output',
+    parser.add_argument('--input-dir', '-i', type=str, default='opsin_output',
                         help='Directory containing input data files')
-    parser.add_argument('--output-dir', '-o', type=str, default='projects/opsin_analysis/opsin_output',
+    parser.add_argument('--output-dir', '-o', type=str, default='opsin_output',
                         help='Directory to save output plots (defaults to input-dir)')
     parser.add_argument('--chain-id', '-c', type=str, default='A',
                         help='Chain ID used in the analysis (default: A)')

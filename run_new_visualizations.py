@@ -6,7 +6,7 @@ This replaces the deprecated plot_figures.py script.
 import os
 import pickle
 import pandas as pd
-from projects.opsin_analysis.visualization_plots import *
+from visualization_plots import *
 
 def load_analysis_data(cache_dir, output_dir):
     """Load analysis data from cache files and CSV files"""
