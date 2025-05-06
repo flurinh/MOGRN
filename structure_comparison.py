@@ -12,9 +12,9 @@ from Bio.PDB.qcprot import QCPSuperimposer
 from tqdm import tqdm
 
 # Import error_analysis module from the local package
-from projects.opsin_analysis.common_utils import compute_retinal_mean_closest_distance
+from common_utils import compute_retinal_mean_closest_distance
 
-from projects.opsin_analysis.visualization_functions import create_and_visualize_similarity_tree, visualize_rmsd_heatmap
+from visualization_functions import create_and_visualize_similarity_tree, visualize_rmsd_heatmap
 
 import matplotlib.pyplot as plt
 

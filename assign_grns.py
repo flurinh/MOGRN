@@ -2,18 +2,18 @@ import pandas as pd
 import os
 import matplotlib.pyplot as plt
 
-from projects.opsin_analysis.reference_alignment import (
+from reference_alignment import (
     find_type_references,
     find_global_reference,
     create_seq_alignment_dicts_from_paths
 )
 
-from projects.opsin_analysis.msa_grn import (
+from msa_grn import (
     analyze_residue_composition,
     generate_grn_msa_tables
 )
 
-from projects.opsin_analysis.visualization_functions import (
+from visualization_functions import (
     plot_average_distances_by_helix,
     plot_distance_heatmap,
     print_residue_composition,

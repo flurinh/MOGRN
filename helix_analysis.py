@@ -9,7 +9,7 @@ import numpy as np
 import json
 from pathlib import Path
 
-from projects.opsin_analysis.data_processing import  ensure_structure_dtypes
+from data_processing import  ensure_structure_dtypes
 
 
 def define_reference_helices(reference_structure, helix_ref_file=None):

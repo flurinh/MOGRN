@@ -1,0 +1,8 @@
+step 1: check property data and prepare data & protos
+step 2: create yaml files
+step 3: set up protos data folder
+step 4: preprocess structures/dataset
+step 5: analysis workflow
+step 6: visualizations
+step 7: assign grns to dataset using protos
+

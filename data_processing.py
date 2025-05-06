@@ -70,7 +70,7 @@ def filter_structures_by_chain_and_retinal(processor, chain='A', retinal_name='R
         Dictionary of filtered dataframes by PDB ID, with only chain A and one retinal
         Also updates the processor's data with the filtered structures.
     """
-    from projects.opsin_analysis.error_analysis import find_retinal_within_cutoff
+    from error_analysis import find_retinal_within_cutoff
     
     filtered_structures = {}
     filtered_dfs = []

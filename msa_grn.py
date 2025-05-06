@@ -8,7 +8,7 @@ import pandas as pd
 import re
 import os
 import matplotlib.pyplot as plt
-from projects.opsin_analysis.visualization_functions import visualize_msa_distances
+from visualization_functions import visualize_msa_distances
 
 def create_msa_table(seq_alignment_dicts, processed_structures_complete, global_ref, atom_type="all"):
     """
@@ -1399,7 +1399,7 @@ def generate_grn_msa_tables(seq_alignment_dicts, processed_structures_complete, 
     
     # Save a visualization of the distances (optional, only if visualization_functions is available)
     try:
-        from projects.opsin_analysis.visualization_functions import plot_distances_with_std
+        from visualization_functions import plot_distances_with_std
         print("[INFO] Creating distance visualizations...")
         
         # Create plots
