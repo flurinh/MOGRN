@@ -692,9 +692,9 @@ def verify_filtering_in_summary(summary_csv_path, error_threshold=3.0):
 
 def main():
     parser = argparse.ArgumentParser(description='Generate plots for opsin analysis.')
-    parser.add_argument('--input-dir', '-i', type=str, default='.',
+    parser.add_argument('--input-dir', '-i', type=str, default='opsin_output/',
                         help='Directory containing input data files (cache subdir, CSVs). Default: current directory.')
-    parser.add_argument('--output-dir', '-o', type=str, default='opsin_plots_output',
+    parser.add_argument('--output-dir', '-o', type=str, default='opsin_output/',
                         help='Directory to save output plots and summaries. Default: opsin_plots_output')
     parser.add_argument('--chain-id', '-c', type=str, default='A',
                         help='Chain ID used in the analysis (default: A)')

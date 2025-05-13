@@ -138,7 +138,7 @@ def load_opsin_property_data(property_file, processed_structures):
     Returns:
         Dictionary with properties and structure mappings
     """
-    print("\n=== Loading Property Data ===")
+    print(f"\n=== Loading Property Data from {property_file}===")
     
     try:
         # Read the property CSV file
@@ -1276,3 +1276,55 @@ def load_opsin_structures(data_dir, output_dir='output', chain_id='A', visualize
     }
 
     return result
+# Import LYR processing utilities
+try:
+    from lyr_processing import convert_lyr_to_lys_ret, process_lyr_in_structures, process_lyr_in_processor
+    print("[INFO] Successfully imported LYR processing utilities")
+except ImportError:
+    print("[WARNING] Could not import LYR processing utilities. LYR residues will not be processed correctly.")
+
+
+def process_lyr_in_loaded_structures(result_dict, retinal_name='RET'):
+    """
+    Process LYR residues in structures that have already been loaded.
+    This is an additional post-processing step that can be applied after load_opsin_structures.
+    
+    Args:
+        result_dict: Dictionary returned by load_opsin_structures
+        retinal_name: Name to use for retinal residues (default: 'RET')
+        
+    Returns:
+        Updated result dictionary with LYR residues processed
+    """
+    try:
+        from lyr_processing import process_lyr_in_structures, process_lyr_in_processor
+        
+        print("\n=== Processing LYR residues (Lysine-Retinal Schiff Base) ===")
+        
+        # Process structures in the result dictionary
+        if 'processed_structures' in result_dict:
+            result_dict['processed_structures'] = process_lyr_in_structures(
+                result_dict['processed_structures'], 
+                retinal_name=retinal_name
+            )
+            print(f"Processed LYR residues in {len(result_dict['processed_structures'])} structures")
+        
+        # Process processors in the result dictionary
+        for processor_key in ['cp_mo_exp', 'cp_mo_pred', 'cp_hide_exp', 'cp_hide_pred']:
+            if processor_key in result_dict and result_dict[processor_key] is not None:
+                processor = result_dict[processor_key]
+                if hasattr(processor, 'data') and processor.data is not None and not processor.data.empty:
+                    print(f"Processing LYR residues in {processor_key}")
+                    process_lyr_in_processor(processor, retinal_name=retinal_name)
+        
+        return result_dict
+    except ImportError:
+        print("[WARNING] Could not import LYR processing utilities. LYR residues will not be processed.")
+        return result_dict
+    except Exception as e:
+        print(f"[WARNING] Error processing LYR residues: {e}")
+        import traceback
+        traceback.print_exc()
+        return result_dict
+
+# Add this to the end of load_opsin_structures function by modifying the source as needed

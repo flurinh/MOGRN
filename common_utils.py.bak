@@ -35,7 +35,7 @@ def compute_retinal_mean_closest_distance(exp_ret_coords, pred_ret_coords):
     # 1) Build NxM distance matrix (for experimental vs. predicted)
     dist_mat = cdist(exp_ret_coords, pred_ret_coords)  # shape (N, M)
     
-    # 2) If N \!= M, we only match min(N,M) pairs
+    # 2) If N != M, we only match min(N,M) pairs
     #    We'll do the "Hungarian method" in a square matrix:
     #    - If one set is larger, we add dummy rows or columns with 0-dist to allow linear_sum_assignment
     #      but effectively ignoring extra atoms.
@@ -84,21 +84,19 @@ def find_retinal_within_cutoff(full_structure_df, chain_df, cutoff=6.0, retinal_
                       within 'cutoff' Å of chain_df.
     """
     # 1) Gather chain coordinates (excluding any retinal atoms in the chain)
-    chain_no_ret = chain_df[chain_df['res_name3l'] \!= retinal_name]
-    chain_no_ret = chain_no_ret[chain_no_ret['res_name3l'] \!= 'LIG']
-    # Also exclude LYR residues as they contain retinal
-    chain_no_ret = chain_no_ret[chain_no_ret['res_name3l'] \!= 'LYR']
+    chain_no_ret = chain_df[chain_df['res_name3l'] != retinal_name]
+    chain_no_ret = chain_no_ret[chain_no_ret['res_name3l'] != 'LIG']
     
     # If after excluding retinal the chain is empty, we can't calculate distances
     if chain_no_ret.empty:
         # Return all retinal atoms from the full structure
-        ret_mask = (full_structure_df['res_name3l'] == retinal_name) | (full_structure_df['res_name3l'] == 'LIG') | (full_structure_df['res_name3l'] == 'LYR')
+        ret_mask = (full_structure_df['res_name3l'] == retinal_name) | (full_structure_df['res_name3l'] == 'LIG')
         return full_structure_df[ret_mask].copy()
         
     chain_coords = chain_no_ret[['x', 'y', 'z']].astype(float).values  # shape: (N,3)
     
     # 2) Subset entire model to just RET or LIG (for predicted structures)
-    ret_mask = (full_structure_df['res_name3l'] == retinal_name) | (full_structure_df['res_name3l'] == 'LIG') | (full_structure_df['res_name3l'] == 'LYR')
+    ret_mask = (full_structure_df['res_name3l'] == retinal_name) | (full_structure_df['res_name3l'] == 'LIG')
     ret_df = full_structure_df[ret_mask].copy()
     
     # Minimal debug output for retinal search
@@ -163,9 +161,5 @@ def find_retinal_within_cutoff(full_structure_df, chain_df, cutoff=6.0, retinal_
     # 5) If we found LIG atoms and they should be renamed to RET
     if 'LIG' in ret_in_range['res_name3l'].unique():
         ret_in_range.loc[ret_in_range['res_name3l'] == 'LIG', 'res_name3l'] = retinal_name
-    
-    # 6) If we found LYR atoms, convert them to RET
-    if 'LYR' in ret_in_range['res_name3l'].unique():
-        ret_in_range.loc[ret_in_range['res_name3l'] == 'LYR', 'res_name3l'] = retinal_name
     
     return ret_in_range

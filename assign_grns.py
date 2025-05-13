@@ -10,7 +10,8 @@ from reference_alignment import (
 
 from msa_grn import (
     analyze_residue_composition,
-    generate_grn_msa_tables
+    generate_grn_msa_tables,
+    complete_msa_tables
 )
 
 from visualization_functions import (
@@ -131,11 +132,21 @@ def align_and_assign_grn(data_dict, output_dir='output', visualize=True):
             structure_mapping=structure_mapping  # Pass structure mapping to prioritize experimental structures
         )
 
-        # Extract tables
-        msa_df = tables["residue_table"]
-        distance_table = tables["distance_table"]
-        ca_msa_df = tables["ca_residue_table"]
-        ca_distance_table = tables["ca_distance_table"]
+        # Post-process to include all residues (new step)
+        print("\n=== Post-processing MSA tables to include all residues ===")
+        completed_tables = complete_msa_tables(
+            tables,
+            processed_structures_complete,
+            global_ref,
+            seq_alignment_dicts,
+            output_dir=output_dir
+        )
+
+        # Extract tables from the completed tables
+        msa_df = completed_tables["residue_table"]
+        distance_table = completed_tables["distance_table"]
+        ca_msa_df = completed_tables["ca_residue_table"]
+        ca_distance_table = completed_tables["ca_distance_table"]
 
         # Report on any excluded structures
         if "excluded_structures" in tables and tables["excluded_structures"]:
