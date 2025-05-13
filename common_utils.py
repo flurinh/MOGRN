@@ -84,10 +84,10 @@ def find_retinal_within_cutoff(full_structure_df, chain_df, cutoff=6.0, retinal_
                       within 'cutoff' Å of chain_df.
     """
     # 1) Gather chain coordinates (excluding any retinal atoms in the chain)
-    chain_no_ret = chain_df[chain_df['res_name3l'] \!= retinal_name]
-    chain_no_ret = chain_no_ret[chain_no_ret['res_name3l'] \!= 'LIG']
+    chain_no_ret = chain_df[chain_df['res_name3l'] != retinal_name]
+    chain_no_ret = chain_no_ret[chain_no_ret['res_name3l'] != 'LIG']
     # Also exclude LYR residues as they contain retinal
-    chain_no_ret = chain_no_ret[chain_no_ret['res_name3l'] \!= 'LYR']
+    chain_no_ret = chain_no_ret[chain_no_ret['res_name3l'] != 'LYR']
     
     # If after excluding retinal the chain is empty, we can't calculate distances
     if chain_no_ret.empty:
