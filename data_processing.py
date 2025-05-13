@@ -126,40 +126,6 @@ def filter_structures_by_chain_and_retinal(processor, chain='A', retinal_name='R
     
     return filtered_structures
 
-"""
-def ensure_structure_dtypes(structures):
-    for pdb_id, data in structures.items():
-        print(f"[DEBUG] Converting data types for {pdb_id}...")
-        for struct_key in ['df', 'df_norm', 'df_ca_norm']:
-            if struct_key in data:
-                df = data[struct_key]
-                # Convert coordinate columns to float
-                for col in ['x', 'y', 'z']:
-                    if col in df.columns:
-                        try:
-                            df[col] = pd.to_numeric(df[col], errors='coerce')
-                        except Exception as e:
-                            print(f"[WARNING] Error converting {col} in {pdb_id}: {e}")
-                # Convert auth_seq_id to appropriate type (could be int or string)
-                if 'auth_seq_id' in df.columns:
-                    # Some auth_seq_id values might have insertion codes (e.g., '123A')
-                    # so we'll keep those as strings, but convert numeric ones to int when possible
-                    try:
-                        # First check if all values can be converted to numeric
-                        df['auth_seq_id_numeric'] = pd.to_numeric(df['auth_seq_id'], errors='coerce')
-                        # If no NaNs, then all values are numeric and can be integers
-                        if not df['auth_seq_id_numeric'].isna().any():
-                            df['auth_seq_id'] = df['auth_seq_id_numeric'].astype(int)
-                        # Drop the temporary column
-                        df = df.drop(columns=['auth_seq_id_numeric'])
-                    except:
-                        # If conversion fails, keep as is
-                        pass
-                # Apply changes back to the structure data
-                data[struct_key] = df
-    return structures
-"""
-
 
 def load_opsin_property_data(property_file, processed_structures):
     """

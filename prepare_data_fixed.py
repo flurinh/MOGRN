@@ -197,43 +197,6 @@ def setup_processor(user_data_root):
 
     return cp, paths
 
-def read_opsin_csv(csv_path=None):
-    """Read the opsin property CSV file."""
-    # Default path to the CSV file if not provided
-    if csv_path is None:
-        csv_path = Path(project_root) / "property" / "mo_exp.csv"
-    
-    # Ensure csv_path is a Path object
-    if not isinstance(csv_path, Path):
-        csv_path = Path(csv_path)
-    
-    # Check if file exists
-    if not csv_path.exists():
-        # Try alternate locations
-        alternate_paths = [
-            project_root / "projects" / "opsin_analysis" / "property" / "mo_exp.csv",
-            project_root / "mo_exp.csv"
-        ]
-        
-        for alt_path in alternate_paths:
-            if alt_path.exists():
-                csv_path = alt_path
-                print(f"Found CSV file at alternate location: {csv_path}")
-                break
-        else:
-            print(f"Warning: CSV file not found at {csv_path} or any alternate locations")
-            return pd.DataFrame()
-    
-    # Read the CSV file
-    df = pd.read_csv(csv_path)
-    
-    # Print columns and some basic info
-    print(f"CSV file columns: {df.columns.tolist()}")
-    print(f"Total entries: {len(df)}")
-    
-    return df
-
-
 def process_local_dataset(cp, dataset_name, dataset_info, user_data_root):
     """Process structures from local files"""
 
@@ -518,23 +481,6 @@ def main():
     
     # Ensure user_data_root exists
     user_data_root.mkdir(parents=True, exist_ok=True)
-    
-    # Look for mo_exp.csv in multiple possible locations
-    csv_path = project_root / "property" / "mo_exp.csv"
-    if not csv_path.exists():
-        alternate_paths = [
-            project_root / "projects" / "opsin_analysis" / "property" / "mo_exp.csv",
-            project_root / "mo_exp.csv"
-        ]
-        
-        for alt_path in alternate_paths:
-            if alt_path.exists():
-                csv_path = alt_path
-                print(f"Found CSV file at: {csv_path}")
-                break
-        else:
-            print(f"Warning: CSV file not found at expected locations. Will try with provided path.")
-            csv_path = Path("projects/opsin_analysis/property/mo_exp.csv")
 
     # Setup processor with proper error handling
     try:
@@ -549,7 +495,8 @@ def main():
 
     # Read property data using the improved function
     try:
-        df = read_opsin_csv(csv_path)
+        excel_path = project_root / "property" / "mo_exp.xlsx"
+        df = pd.read_excel(excel_path)
         print(f"\n=== Property Data ===")
         print(f"Unique PDB IDs: {len(df['pdb_id'].unique())}")
     except Exception as e:

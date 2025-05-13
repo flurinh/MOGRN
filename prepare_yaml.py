@@ -6,10 +6,7 @@ import matplotlib.pyplot as plt
 from ruamel.yaml import YAML
 
 # Load the dataset
-df = pd.read_excel('property/mo_exp_edited.xlsx', index_col=0)
-
-# Filter entries that should be included
-df = df[df['remove'] == 'include']
+df = pd.read_excel('property/mo_exp.xlsx', index_col=0)
 
 # Clean sequences by removing spaces
 df['seq'] = df['seq'].str.replace(' ', '')
@@ -55,7 +52,7 @@ sample_rows = df[['opsin name', 'short_name', 'display_name']].head(5)
 print(sample_rows)
 
 # Create the output directory if it doesn't exist
-os.makedirs('yaml_configs/mo_folding5', exist_ok=True)
+os.makedirs('yaml_configs/mo_folding6', exist_ok=True)
 
 # Initialize YAML writer
 yaml_writer = YAML()
@@ -106,7 +103,7 @@ for index, row in df.iterrows():
     }
     
     # Create filename based on short_name
-    filename = f'yaml_configs/mo_folding5/{short_name}.yaml'
+    filename = f'yaml_configs/mo_folding6/{short_name}.yaml'
     
     # Write the file with proper formatting
     with open(filename, 'w') as file:
@@ -123,7 +120,7 @@ for index, row in df.iterrows():
     
     print(f"Created YAML file: {filename}")
 
-print(f"Finished creating {len(df)} YAML files in yaml_configs/mo_folding5/")
+print(f"Finished creating {len(df)} YAML files in yaml_configs/mo_folding6/")
 
 # Create special YAML file with two ligands for Tara_RRB
 tara_row = df[df['short_name'] == 'Tara_RRB']
@@ -173,7 +170,7 @@ if not tara_row.empty:
     }
     
     # Create filename
-    filename = 'yaml_configs/mo_folding5/Tara_RRB_2_retinals.yaml'
+    filename = 'yaml_configs/mo_folding6/Tara_RRB_2_retinals.yaml'
     
     # Write the file with proper formatting
     with open(filename, 'w') as file:
