@@ -1,803 +1,1422 @@
 """
 Functions for multiple structure alignment and Generic Residue Numbering (GRN).
-These functions create and analyze multiple sequence alignments (based on structural
-alignment to a global reference) with GRN position labels.
+These functions create and analyze multiple sequence alignments with GRN position labels.
 """
 
 import numpy as np
 import pandas as pd
 import re
 import os
-import matplotlib.pyplot as plt # Keep for potential direct use or if visualize_msa_distances is used elsewhere
-from tqdm import tqdm # Keep if used in generate_grn_msa_tables or other retained functions
-import pickle # For generate_grn_msa_tables caching
-
-# Assuming visualization_functions.py might contain visualize_msa_distances or other relevant functions
-# If not used directly in this file after reverting, it can be removed.
-try:
-    from visualization_functions import visualize_msa_distances
-except ImportError:
-    print("[WARN] visualization_functions.py not found or visualize_msa_distances not in it.")
-    def visualize_msa_distances(*args, **kwargs): # Dummy
-        print("[WARN] visualize_msa_distances called but not available.")
-        return {}
-
+import matplotlib.pyplot as plt
+from visualization_functions import visualize_msa_distances
 
 def create_msa_table(seq_alignment_dicts, processed_structures_complete, global_ref, atom_type="all"):
     """
-    Creates an MSA-like table from structural alignment dictionaries.
-    Columns are defined by the global_ref structure. Only residues from other
-    structures that align to global_ref are included.
-
+    Creates an MSA-like table from alignment dictionaries.
+    
     Args:
-        seq_alignment_dicts: Dictionary with sequence alignments (struct_id -> {ref_pos: aligned_pos})
+        seq_alignment_dicts: Dictionary with sequence alignments
         processed_structures_complete: Dictionary with structure data
         global_ref: ID of global reference structure
-        atom_type: Atom subset to use for extracting residue info ('CA' or 'all')
-
+        atom_type: Atom subset to use ('CA' or 'all')
+        
     Returns:
-        DataFrame: MSA table with residue information (AA + original auth_seq_id).
-                   Columns are initially 1-based sequential integers.
-                   An attribute 'column_to_auth_seq' maps these integers to
-                   the auth_seq_id of the global_ref.
+        DataFrame: MSA table with residue information
     """
+    # Get global alignments
     global_alignments = seq_alignment_dicts.get('global', {})
-    if not global_ref in processed_structures_complete:
-        raise ValueError(f"Global reference structure {global_ref} not found in processed_structures_complete.")
+    
+    # Get global reference structure
     global_ref_struct = processed_structures_complete[global_ref]
-
+    
+    # Get appropriate dataframe
     if atom_type == "CA":
-        if 'df_ca_norm' not in global_ref_struct:
-            raise ValueError(f"Global reference {global_ref} missing 'df_ca_norm' for atom_type 'CA'.")
         global_ref_df = global_ref_struct['df_ca_norm']
-        # Ensure we only consider CA atoms if that's the specific intent for 'df_ca_norm' usage
         global_ref_df = global_ref_df[global_ref_df['res_atom_name'] == 'CA']
-    else: # "all"
-        if 'df_norm' not in global_ref_struct:
-            raise ValueError(f"Global reference {global_ref} missing 'df_norm' for atom_type 'all'.")
+    else:
         global_ref_df = global_ref_struct['df_norm']
-        # Get one representative row per residue (e.g., based on auth_seq_id and chain)
-        global_ref_df = global_ref_df.drop_duplicates(subset=['auth_chain_id', 'auth_seq_id'], keep='first')
-
-    if 'auth_seq_id' not in global_ref_df.columns:
-        raise ValueError(f"Column 'auth_seq_id' not found in DataFrame for global_ref {global_ref}.")
-
-    # Define columns based on unique, sorted auth_seq_ids of the global reference
-    def sort_key_auth_id(auth_id_str_or_num):
-        auth_id_str = str(auth_id_str_or_num)
-        match = re.match(r"(-?\d+)([A-Za-z]*)", auth_id_str)
-        if match:
-            num_part, letter_part = match.groups()
-            return (int(num_part), letter_part.upper())
-        try: return (int(auth_id_str), "")
-        except ValueError: return (float('inf'), auth_id_str.upper())
-
-    global_ref_positions_orig_type = sorted(global_ref_df['auth_seq_id'].unique(), key=sort_key_auth_id)
-    # Ensure all positions are strings for consistent dictionary keys later if needed, though not strictly for list.
-    # For this function's direct use, original type is fine if comparison is consistent.
-
-    sequences_data = {} # {struct_id: {global_ref_pos_orig_type: "AA[orig_auth_id_in_struct]"}}
-
-    # Process global reference itself
-    sequences_data[global_ref] = {}
-    for ref_pos_orig in global_ref_positions_orig_type:
-        res_rows = global_ref_df[global_ref_df['auth_seq_id'] == ref_pos_orig]
-        if not res_rows.empty:
-            aa = res_rows['res_name1l'].iloc[0] if 'res_name1l' in res_rows.columns else '?'
-            sequences_data[global_ref][ref_pos_orig] = f"{aa}{ref_pos_orig}"
+        global_ref_df = global_ref_df.drop_duplicates(subset=['auth_seq_id', 'auth_chain_id'])
+    
+    # Get global positions (sorted auth_seq_ids)
+    global_positions = sorted(global_ref_df['auth_seq_id'].unique())
+    
+    # Initialize sequences dictionary
+    sequences = {}
+    
+    # Add global reference to sequences
+    sequences[global_ref] = {}
+    for pos in global_positions:
+        residues = global_ref_df[global_ref_df['auth_seq_id'] == pos]
+        if not residues.empty:
+            if 'res_name1l' in residues.columns:
+                aa = residues['res_name1l'].iloc[0]
+            else:
+                aa = '?'
+            sequences[global_ref][pos] = f"{aa}{pos}"
         else:
-            sequences_data[global_ref][ref_pos_orig] = '-' # Should not happen if positions from df
-
-    # Process other structures based on their alignment to global_ref
-    all_aligned_struct_ids = set(global_alignments.keys())
-    type_specific_struct_ids = set()
-    if 'type' in seq_alignment_dicts:
-        for type_ref_val, structs_val in seq_alignment_dicts['type'].items():
-            type_specific_struct_ids.update(structs_val.keys())
-
-    all_struct_ids_to_process = list(all_aligned_struct_ids.union(type_specific_struct_ids) - {global_ref})
-
-
-    for struct_id in all_struct_ids_to_process:
-        if struct_id not in processed_structures_complete:
-            print(f"[WARN] create_msa_table: Structure {struct_id} from alignments not in processed_structures_complete. Skipping.")
-            continue
-
-        struct_data = processed_structures_complete[struct_id]
-        current_struct_df_source = None
+            sequences[global_ref][pos] = '-'
+    
+    # Process global alignments
+    for struct_id, alignment in global_alignments.items():
+        struct = processed_structures_complete[struct_id]
+        
+        # Get appropriate dataframe
         if atom_type == "CA":
-            if 'df_ca_norm' not in struct_data: continue
-            current_struct_df_source = struct_data['df_ca_norm'][struct_data['df_ca_norm']['res_atom_name'] == 'CA']
-        else: # "all"
-            if 'df_norm' not in struct_data: continue
-            current_struct_df_source = struct_data['df_norm'].drop_duplicates(subset=['auth_chain_id', 'auth_seq_id'], keep='first')
-
-        if current_struct_df_source is None or current_struct_df_source.empty : continue
-        if 'auth_seq_id' not in current_struct_df_source.columns : continue
-
-
-        sequences_data[struct_id] = {ref_pos: '-' for ref_pos in global_ref_positions_orig_type} # Init with gaps
-
-        alignment_to_global = global_alignments.get(struct_id)
-
-        # If no direct global alignment, check for type-specific alignment path
-        if not alignment_to_global and 'type' in seq_alignment_dicts:
-            for type_ref_key, type_structs_dict in seq_alignment_dicts['type'].items():
-                if struct_id in type_structs_dict:
-                    type_specific_alignment = type_structs_dict[struct_id] # struct_id -> type_ref
-                    type_ref_to_global_alignment = global_alignments.get(type_ref_key) # type_ref -> global_ref
-
-                    if type_specific_alignment and type_ref_to_global_alignment:
-                        # Reconstruct alignment to global_ref through type_ref
-                        alignment_to_global = {}
-                        for type_pos, s_pos in type_specific_alignment.items():
-                            for g_pos, tr_pos in type_ref_to_global_alignment.items():
-                                if tr_pos == type_pos:
-                                    alignment_to_global[g_pos] = s_pos
-                                    break
-                        break # Found a path via a type reference
-
-        if alignment_to_global:
-            for ref_pos, aligned_s_pos in alignment_to_global.items():
-                # ref_pos is an auth_seq_id from global_ref. It must be in global_ref_positions_orig_type
-                if ref_pos in sequences_data[struct_id]: # Check if this ref_pos is a column
-                    res_rows_struct = current_struct_df_source[current_struct_df_source['auth_seq_id'] == aligned_s_pos]
-                    if not res_rows_struct.empty:
-                        aa_struct = res_rows_struct['res_name1l'].iloc[0] if 'res_name1l' in res_rows_struct.columns else '?'
-                        sequences_data[struct_id][ref_pos] = f"{aa_struct}{aligned_s_pos}"
-        # else:
-            # print(f"[DEBUG] create_msa_table: No alignment path to global_ref found for {struct_id}")
-
-    # Ensure all PDB IDs present in processed_structures_complete (and thus potentially in msa_df.index later)
-    # are also keys in sequences_data, initialized with gaps if they had no alignment data.
-    # This is important if generate_grn_msa_tables passes a filtered_structures list that
-    # might have entries not covered by seq_alignment_dicts.
-    for sid_check in processed_structures_complete.keys():
-        if sid_check not in sequences_data:
-            sequences_data[sid_check] = {ref_pos: '-' for ref_pos in global_ref_positions_orig_type}
-            # print(f"[DEBUG] create_msa_table: Initializing {sid_check} with all gaps as it was not in alignment dicts.")
-
-
-    # Convert dictionary of dictionaries to DataFrame
-    # Rows: struct_id, Columns: global_ref_positions_orig_type
-    msa_df = pd.DataFrame.from_dict(sequences_data, orient='index')
-
-    # Ensure columns are in the correct order of sorted global_ref_positions_orig_type
-    # and handle cases where some structures might not have entries for all global_ref_positions if dict was sparse
-    msa_df = msa_df.reindex(columns=global_ref_positions_orig_type, fill_value='-')
-
-    # Rename columns to 1-based sequential integers for downstream compatibility (e.g., with older GRN mapping)
-    # Store the mapping from these integers back to the original global_ref auth_seq_ids
-    column_mapping_to_ref_auth_id = {i + 1: orig_pos for i, orig_pos in enumerate(global_ref_positions_orig_type)}
+            struct_df = struct['df_ca_norm']
+            struct_df = struct_df[struct_df['res_atom_name'] == 'CA']
+        else:
+            struct_df = struct['df_norm']
+            struct_df = struct_df.drop_duplicates(subset=['auth_seq_id', 'auth_chain_id'])
+        
+        # Initialize sequence with gaps
+        sequences[struct_id] = {pos: '-' for pos in global_positions}
+        
+        # Fill in aligned positions
+        for ref_pos, aligned_pos in alignment.items():
+            if ref_pos in global_positions:
+                residues = struct_df[struct_df['auth_seq_id'] == aligned_pos]
+                if not residues.empty:
+                    if 'res_name1l' in residues.columns:
+                        aa = residues['res_name1l'].iloc[0]
+                    else:
+                        aa = '?'
+                    sequences[struct_id][ref_pos] = f"{aa}{aligned_pos}"
+    
+    # Process type-specific alignments
+    type_alignments = seq_alignment_dicts.get('type', {})
+    for type_ref, structs in type_alignments.items():
+        if type_ref == global_ref:
+            continue  # Skip if type reference is global reference
+        
+        # Get global alignment for this type reference
+        type_to_global = global_alignments.get(type_ref, {})
+        
+        for struct_id, alignment in structs.items():
+            struct = processed_structures_complete[struct_id]
+            
+            # Get appropriate dataframe
+            if atom_type == "CA":
+                struct_df = struct['df_ca_norm']
+                struct_df = struct_df[struct_df['res_atom_name'] == 'CA']
+            else:
+                struct_df = struct['df_norm']
+                struct_df = struct_df.drop_duplicates(subset=['auth_seq_id', 'auth_chain_id'])
+            
+            # Initialize sequence with gaps
+            sequences[struct_id] = {pos: '-' for pos in global_positions}
+            
+            # Map through type reference to global reference
+            for type_pos, struct_pos in alignment.items():
+                # Find corresponding global position
+                global_pos = None
+                for g_pos, t_pos in type_to_global.items():
+                    if t_pos == type_pos:
+                        global_pos = g_pos
+                        break
+                
+                if global_pos in global_positions:
+                    residues = struct_df[struct_df['auth_seq_id'] == struct_pos]
+                    if not residues.empty:
+                        if 'res_name1l' in residues.columns:
+                            aa = residues['res_name1l'].iloc[0]
+                        else:
+                            aa = '?'
+                        sequences[struct_id][global_pos] = f"{aa}{struct_pos}"
+    
+    # Convert sequences dictionary to DataFrame
+    msa_df = pd.DataFrame(sequences).T
+    
+    # Make sure columns are in the correct order (sorted global positions)
+    msa_df = msa_df[global_positions]
+    
+    # Rename columns to sequential numbers for compatibility with old code
     msa_df.columns = range(1, len(msa_df.columns) + 1)
-    msa_df.attrs['column_to_auth_seq'] = column_mapping_to_ref_auth_id
-
+    
+    # Store the mapping between column numbers and global positions
+    # for reference when adding GRN labels
+    msa_df.attrs['column_to_auth_seq'] = {i + 1: pos for i, pos in enumerate(global_positions)}
+    
     return msa_df
-
 
 def process_alignment_df(msa_df):
     """
-    Converts alignment DataFrame (cells are "AAresnum") to a position frequency matrix.
+    Converts alignment DataFrame to a position weight matrix.
+    
     Args:
-        msa_df: MSA DataFrame from create_msa_table (or already GRN labeled)
+        msa_df: MSA DataFrame from create_msa_table
+        
     Returns:
-        DataFrame: Position frequency matrix (amino acids vs. positions)
+        DataFrame: Position weight matrix
     """
-    amino_acid_data = {}
-    for col_grn_label in msa_df.columns:
-        aa_counts_at_pos = {}
-        for cell_val in msa_df[col_grn_label]:
-            if pd.isna(cell_val) or cell_val == '-':
+    # Extract amino acid identities from MSA
+    amino_acids = {}
+    
+    for col in msa_df.columns:
+        aa_counts = {}
+        
+        for val in msa_df[col]:
+            if val == '-':
                 continue
-            aa = str(cell_val)[0] # First char is amino acid
-            aa_counts_at_pos[aa] = aa_counts_at_pos.get(aa, 0) + 1
-        amino_acid_data[col_grn_label] = aa_counts_at_pos
+                
+            # Extract amino acid from value (format: 'A123')
+            aa = val[0] if len(val) > 0 else '?'
+            
+            aa_counts[aa] = aa_counts.get(aa, 0) + 1
+        
+        amino_acids[col] = aa_counts
+    
+    # Convert to DataFrame
+    aa_df = pd.DataFrame(amino_acids).fillna(0)
+    
+    # Calculate frequencies
+    for col in aa_df.columns:
+        col_sum = aa_df[col].sum()
+        if col_sum > 0:
+            aa_df[col] = aa_df[col] / col_sum
+    
+    return aa_df
 
-    # Convert to DataFrame (pos as columns, aa as index) and fill NaNs with 0
-    aa_df = pd.DataFrame(amino_acid_data).fillna(0).T # Transpose to get AA as columns
-
-    # Calculate frequencies (normalize each row)
-    # Ensure that we only divide by sum if sum > 0
-    row_sums = aa_df.sum(axis=1)
-    aa_freq_df = aa_df.apply(lambda r: r / row_sums[r.name] if row_sums[r.name] > 0 else r, axis=1)
-
-    return aa_freq_df.T # Transpose back: AA as index, GRN pos as columns
-
-
-def analyze_residue_composition(msa_df, positions_to_analyze):
+def analyze_residue_composition(msa_df, positions):
     """
-    Analyzes residue composition at specific GRN-labeled positions.
+    Analyzes residue composition at specific positions.
+    Only processes valid TM helix positions (format N.XX where N is 1-7).
+    
     Args:
-        msa_df: MSA DataFrame with GRN column names.
-        positions_to_analyze: List of GRN positions to analyze.
+        msa_df: MSA DataFrame from create_msa_table
+        positions: List of positions to analyze
+        
     Returns:
-        dict: {position: {'counts': {}, 'frequencies': {}, 'sorted': [], 'total': int, 'conservation': float}}
+        dict: Dictionary with position analysis
     """
     results = {}
-    for grn_pos in positions_to_analyze:
-        if grn_pos not in msa_df.columns:
-            results[grn_pos] = {'error': f'Position {grn_pos} not found in MSA table.'}
-            continue
-
-        aa_counts = {}
-        total_residues_at_pos = 0
-        for cell_value in msa_df[grn_pos]:
-            if pd.isna(cell_value) or cell_value == '-':
-                aa_counts['-'] = aa_counts.get('-', 0) + 1
+    
+    # Filter positions to only include valid TM helix positions
+    filtered_positions = []
+    for pos in positions:
+        pos_str = str(pos)
+        # Only include positions with format N.XX where N is 1-7
+        if '.' in pos_str:
+            try:
+                helix_num = int(pos_str.split('.')[0])
+                if 1 <= helix_num <= 7:
+                    filtered_positions.append(pos)
+            except ValueError:
+                # Skip positions with non-numeric helix values
+                results[pos] = {'error': 'Invalid helix number (must be 1-7)'}
                 continue
-
-            aa = str(cell_value)[0] # First character is amino acid
-            aa_counts[aa] = aa_counts.get(aa, 0) + 1
-            if aa != '-': # Don't count gaps in total for conservation calculation
-                total_residues_at_pos += 1
-
-        if total_residues_at_pos > 0:
-            # Exclude gap counts for frequency and conservation calculation
-            aa_freq_no_gaps = {
-                aa_key: count / total_residues_at_pos
-                for aa_key, count in aa_counts.items() if aa_key != '-'
-            }
-            sorted_aa_freq = sorted(aa_freq_no_gaps.items(), key=lambda item: item[1], reverse=True)
-
-            results[grn_pos] = {
-                'counts': aa_counts, # Includes gaps
-                'frequencies': aa_freq_no_gaps, # Excludes gaps from normalization
-                'sorted': sorted_aa_freq,
-                'total_residues_no_gaps': total_residues_at_pos,
-                'conservation': max(aa_freq_no_gaps.values()) if aa_freq_no_gaps else 0.0
-            }
-        else: # All gaps at this position
-            results[grn_pos] = {
+        else:
+            # Skip positions without dot notation
+            results[pos] = {'error': 'Invalid GRN format (must be N.XX)'}
+            continue
+    
+    for pos in filtered_positions:
+        if pos not in msa_df.columns:
+            results[pos] = {'error': 'Position not found'}
+            continue
+        
+        pos_data = msa_df[pos].value_counts(dropna=False)
+        
+        # Extract amino acids
+        aa_counts = {}
+        
+        for val, count in pos_data.items():
+            if pd.isna(val) or val == '-':
+                aa_counts['-'] = aa_counts.get('-', 0) + count
+                continue
+                
+            # Extract amino acid from value (format: 'A123') - first character
+            if isinstance(val, str) and len(val) > 0:
+                aa = val[0]
+                aa_counts[aa] = aa_counts.get(aa, 0) + count
+            else:
+                # Handle non-string or empty values
+                aa_counts['?'] = aa_counts.get('?', 0) + count
+        
+        # Calculate frequencies
+        total = sum(aa_counts.values())
+        if total > 0:
+            aa_freq = {aa: count / total for aa, count in aa_counts.items()}
+            
+            # Sort by frequency
+            sorted_aa = sorted(aa_freq.items(), key=lambda x: x[1], reverse=True)
+            
+            results[pos] = {
                 'counts': aa_counts,
-                'frequencies': {}, 'sorted': [], 'total_residues_no_gaps': 0, 'conservation': 0.0,
-                'note': 'All gaps at this position.'
+                'frequencies': aa_freq,
+                'sorted': sorted_aa,
+                'total': total,
+                'conservation': max(aa_freq.values()) if aa_freq else 0
             }
+        else:
+            results[pos] = {'error': 'No valid residues found'}
+    
     return results
 
-def sort_grn_columns(df):
+def count_residues_by_helix(df):
     """
-    Sorts columns of a GRN-labeled DataFrame (e.g., "1.50", "n.10", "1.501").
-    """
-    def get_sort_key(col_name_str_original):
-        col_name_str = str(col_name_str_original)
-        type_prefix = 5
-        primary_val = float('inf')
-        secondary_val = float('inf') # For TM position or insertion part
-
-        if col_name_str.startswith('n.'):
-            type_prefix = 0
-            try: primary_val = float(col_name_str.split('.')[1])
-            except: primary_val = str(col_name_str_original)
-        elif col_name_str.startswith('c.'):
-            type_prefix = 10
-            try: primary_val = float(col_name_str.split('.')[1])
-            except: primary_val = str(col_name_str_original)
-        elif re.match(r"(\d{1,2})(\d{1,2})\.(\d+)", col_name_str): # Loop AB.CCC
-            match = re.match(r"(\d{1,2})(\d{1,2})\.(\d+)", col_name_str)
-            type_prefix = 8
-            try:
-                primary_val = int(match.group(1))
-                secondary_val = float(f"{int(match.group(2))}.{int(match.group(3))}")
-            except: primary_val = str(col_name_str_original)
-        elif col_name_str.startswith('L.'):
-            type_prefix = 9
-            try: primary_val = float(col_name_str.split('.')[1])
-            except: primary_val = str(col_name_str_original)
-        elif re.match(r"(\d+)\.([\d\.]+)", col_name_str): # TM helix (1.50) or insertion (1.501)
-            match = re.match(r"(\d+)\.(.+)", col_name_str)
-            try:
-                helix_num_str = match.group(1)
-                pos_part_str = match.group(2)
-                primary_val = int(helix_num_str)
-                secondary_val = float(pos_part_str) # Handles "50" and "50.001"
-                if 1 <= primary_val <= 7: type_prefix = primary_val
-                else: type_prefix = 7.5 # Other X.Y sort after TM7
-            except (ValueError, AttributeError):
-                primary_val = str(col_name_str_original); type_prefix = 99
-        elif col_name_str.startswith(('I.', 'ERR_I.', 'FMT_ERR_I.')):
-            type_prefix = 98
-            try: primary_val = float(re.search(r'(\d+(\.\d+)?)', col_name_str).group(1)) # Try to get number
-            except: primary_val = str(col_name_str_original)
-        elif col_name_str.startswith('X.'): # Fallback from assign_helix_numbers_to_msa_tables
-             type_prefix = 97
-             try: primary_val = int(col_name_str.split('.')[1])
-             except: primary_val = str(col_name_str_original)
-        else:
-            type_prefix = 99
-            primary_val = str(col_name_str_original)
-        return (type_prefix, primary_val, secondary_val)
-    try:
-        string_cols = [col for col in df.columns if isinstance(col, (str, int, float))] # Allow numbers too
-        # Non-string/numeric columns are problematic for this sort key, filter or handle them
-        sorted_string_cols = sorted(string_cols, key=get_sort_key)
-        return df[sorted_string_cols]
-    except Exception as e:
-        print(f"[ERROR] Sorting GRN columns failed: {e}. Returning unsorted.")
-        import traceback
-        traceback.print_exc()
-        return df
-
-
-def create_msa_distance_table(seq_alignment_dicts, processed_structures_complete, global_ref_id,
-                              residue_table_with_grn_cols, # Pass the GRN labeled table
-                              distance_type="sidechain"):
-    """
-    Creates a distance table (retinal to residue) based on an existing GRN-labeled MSA table.
-    The columns of the output distance table will match the GRN columns of the input residue_table.
-    """
-    from scipy.spatial.distance import cdist # Import locally
-
-    if residue_table_with_grn_cols.empty:
-        print("[WARN] create_msa_distance_table: Input residue_table is empty. Returning empty DataFrame.")
-        return pd.DataFrame(index=residue_table_with_grn_cols.index, columns=residue_table_with_grn_cols.columns)
-
-    # Initialize a DataFrame for distances with NaNs, matching structure of residue_table_with_grn_cols
-    distance_df_data = {
-        grn_col: pd.Series(np.nan, index=residue_table_with_grn_cols.index)
-        for grn_col in residue_table_with_grn_cols.columns
-    }
-    distance_df = pd.DataFrame(distance_df_data)
-
-    # Iterate through each structure (row) in the residue_table
-    for struct_id in tqdm(residue_table_with_grn_cols.index, desc=f"Calculating distances ({distance_type})"):
-        if struct_id not in processed_structures_complete:
-            # print(f"[DEBUG] {struct_id} not in processed_structures. Skipping for distance calc.")
-            continue
-        struct_data = processed_structures_complete[struct_id]
-
-        # Determine source DataFrame for coordinates based on distance_type
-        struct_coord_df_source = None
-        if distance_type == "backbone": # CA-CA distances typically
-            if 'df_ca_norm' in struct_data:
-                struct_coord_df_source = struct_data['df_ca_norm'][struct_data['df_ca_norm']['res_atom_name'] == 'CA'].copy()
-        else: # "sidechain" - all atoms
-            if 'df_norm' in struct_data:
-                struct_coord_df_source = struct_data['df_norm'].copy()
-
-        if struct_coord_df_source is None or struct_coord_df_source.empty:
-            # print(f"[DEBUG] No suitable coord df for {struct_id}, type {distance_type}. Skipping.")
-            continue
-        if 'res_name3l' not in struct_coord_df_source.columns or 'auth_seq_id' not in struct_coord_df_source.columns:
-            # print(f"[DEBUG] Essential columns missing in coord_df for {struct_id}. Skipping.")
-            continue
-
-        # Extract retinal coordinates for this structure
-        ret_df = struct_coord_df_source[struct_coord_df_source['res_name3l'] == 'RET']
-        if ret_df.empty: ret_df = struct_coord_df_source[struct_coord_df_source['res_name3l'] == 'LIG'] # Fallback
-        if ret_df.empty:
-            # print(f"[DEBUG] No retinal found for {struct_id}. Distances will be NaN.")
-            continue
-        ret_coords_xyz = ret_df[['x', 'y', 'z']].values.astype(float)
-        if ret_coords_xyz.size == 0: continue
-
-
-        # Iterate through each GRN column of the input residue_table
-        for grn_col_label in residue_table_with_grn_cols.columns:
-            cell_value = residue_table_with_grn_cols.at[struct_id, grn_col_label]
-            if pd.isna(cell_value) or cell_value == '-':
-                continue # Skip gaps
-
-            # Extract original auth_seq_id from the cell value (e.g., "A123" -> "123")
-            # This auth_seq_id is from the *current struct_id*, not the global_ref
-            match = re.match(r"[A-Z Оюн\?\*](-?[\d\w]+)", str(cell_value))
-            if not match:
-                # print(f"[DEBUG] Could not parse auth_seq_id from cell '{cell_value}' for {struct_id}, col {grn_col_label}")
-                continue
-
-            original_auth_seq_id_in_struct = match.group(1)
-            # Attempt to convert to original type for matching if needed (int, or str if it has letters)
-            try:
-                # Check if it can be an int, otherwise it's a string (e.g. 10A)
-                # The comparison with df['auth_seq_id'] must handle mixed types or convert consistently
-                if re.fullmatch(r"-?\d+", original_auth_seq_id_in_struct):
-                    key_for_lookup = int(original_auth_seq_id_in_struct)
-                else:
-                    key_for_lookup = original_auth_seq_id_in_struct
-            except ValueError:
-                 key_for_lookup = original_auth_seq_id_in_struct
-
-
-            # Find atoms of this residue in the current structure's coordinate DataFrame
-            # Ensure we are not selecting retinal itself if using 'all' atoms and retinal is not filtered out above
-            if distance_type == "sidechain": # use 'all' atoms but exclude retinal
-                residue_atoms_df = struct_coord_df_source[
-                    (struct_coord_df_source['auth_seq_id'] == key_for_lookup) &
-                    (struct_coord_df_source['res_name3l'] != 'RET') & # Ensure not retinal
-                    (struct_coord_df_source['res_name3l'] != 'LIG')
-                ]
-            else: # backbone (CA only)
-                 residue_atoms_df = struct_coord_df_source[struct_coord_df_source['auth_seq_id'] == key_for_lookup]
-
-
-            if residue_atoms_df.empty:
-                # print(f"[DEBUG] Residue {original_auth_seq_id_in_struct} not found in {struct_id}'s coord df for col {grn_col_label}")
-                continue
-
-            res_coords_xyz = residue_atoms_df[['x', 'y', 'z']].values.astype(float)
-            if res_coords_xyz.size == 0: continue
-
-            try:
-                distances_matrix = cdist(res_coords_xyz, ret_coords_xyz)
-                min_dist = float(np.min(distances_matrix))
-                distance_df.at[struct_id, grn_col_label] = min_dist
-            except Exception as e_dist:
-                print(f"[WARN] cdist failed for {struct_id}, col {grn_col_label}, res {original_auth_seq_id_in_struct}: {e_dist}")
-
-    return distance_df
-
-
-def find_closest_ret_residue(struct_data, helix_num):
-    """
-    Finds the auth_seq_id of the residue in a specific helix that is closest to retinal.
-    Uses 'df_norm' for coordinates.
+    Counts residue positions by helix in a GRN-labeled DataFrame.
+    Focuses primarily on N.YY format (where N is the helix number) to match your desired output.
+    
     Args:
-        struct_data: Dictionary for a single structure from processed_structures_complete.
-        helix_num: Integer, the helix number (1-7).
+        df: DataFrame with GRN column labels
+        
     Returns:
-        The auth_seq_id (original type) of the closest residue, or None.
+        dict: Dictionary with counts of positions per helix
     """
-    from scipy.spatial.distance import cdist # Import locally
-
-    if 'df_norm' not in struct_data or struct_data['df_norm'].empty: return None
-    df = struct_data['df_norm']
-    if not all(col in df.columns for col in ['res_name3l', 'auth_seq_id', 'helix_num', 'tm_helix', 'x', 'y', 'z']):
-        return None # Missing essential columns
-
-    ret_df = df[df['res_name3l'] == 'RET']
-    if ret_df.empty: ret_df = df[df['res_name3l'] == 'LIG']
-    if ret_df.empty: return None
-    ret_coords = ret_df[['x', 'y', 'z']].values.astype(float)
-    if ret_coords.size == 0: return None
-
-    helix_residues_df = df[
-        (df['helix_num'] == helix_num) & \
-        (df['tm_helix'] == True) & \
-        (~df['res_name3l'].isin(['RET', 'LIG'])) # Exclude retinal itself
-    ]
-    if helix_residues_df.empty: return None
-
-    min_overall_distance = float('inf')
-    closest_auth_seq_id = None
-
-    for auth_id, res_group_df in helix_residues_df.groupby('auth_seq_id'):
-        res_atoms_coords = res_group_df[['x', 'y', 'z']].values.astype(float)
-        if res_atoms_coords.size == 0: continue
-
-        dist_matrix = cdist(res_atoms_coords, ret_coords)
-        min_dist_for_this_res = np.min(dist_matrix)
-
-        if min_dist_for_this_res < min_overall_distance:
-            min_overall_distance = min_dist_for_this_res
-            closest_auth_seq_id = auth_id # auth_id is the original type from df
-
-    return closest_auth_seq_id
-
-
-# --- Main Orchestrating Function for GRN Table Generation ---
-def generate_grn_msa_tables(seq_alignment_dicts,
-                            processed_structures_complete,
-                            global_ref_id,
-                            rmsd_df=None,
-                            max_rmsd_threshold=3.0,
-                            structure_mapping=None,
-                            output_dir="opsin_grn_tables"): # Added output_dir
-    """
-    Original functionality: Creates MSA tables (residue & distance) based on structural
-    alignments to a global reference, then assigns GRN labels to columns.
-    Does NOT attempt to include all residues, only structurally aligned ones.
-    """
-    print(f"[INFO] generate_grn_msa_tables called for global_ref: {global_ref_id}")
-
-    # 1. Filter structures (optional, based on RMSD and experimental priority)
-    filtered_structures = processed_structures_complete.copy()
-    # Make a deep copy of seq_alignment_dicts to avoid modifying the original
-    filtered_seq_alignments = {
-        'global': {k: v.copy() for k, v in seq_alignment_dicts.get('global', {}).items()},
-        'type': {
-            type_ref: {struct_k: struct_v.copy() for struct_k, struct_v in type_aligns.items()}
-            for type_ref, type_aligns in seq_alignment_dicts.get('type', {}).items()
-        }
-    }
-    excluded_structures_log = []
-
-    # Prioritize experimental if mapping provided
-    if structure_mapping:
-        # ... (your existing prioritization logic - ensure it modifies filtered_structures and filtered_seq_alignments) ...
-        pass # Placeholder for your existing logic
-
-    # Filter by RMSD to global_ref_id
-    if rmsd_df is not None and global_ref_id in rmsd_df.index:
-        # ... (your existing RMSD filtering logic - ensure it modifies filtered_structures and filtered_seq_alignments) ...
-        pass # Placeholder for your existing logic
-
-    if not filtered_structures or global_ref_id not in filtered_structures:
-        print(f"[ERROR] Global reference {global_ref_id} missing or no structures left after filtering.")
-        return {"residue_table": pd.DataFrame(), "distance_table": pd.DataFrame(),
-                "ca_residue_table": pd.DataFrame(), "ca_distance_table": pd.DataFrame(),
-                "excluded_structures": excluded_structures_log, "error": "Filtering issue"}
-
-    print(f"[INFO] Using {len(filtered_structures)} structures after filtering for GRN table generation.")
-
-    # 2. Create initial MSA-like tables (columns are sequential integers)
-    #    These tables only contain structurally aligned residues.
-    print("[INFO] Creating base MSA tables (structurally aligned residues only)...")
-    base_residue_table_all = create_msa_table(filtered_seq_alignments, filtered_structures, global_ref_id, atom_type="all")
-    base_residue_table_ca = create_msa_table(filtered_seq_alignments, filtered_structures, global_ref_id, atom_type="CA")
-
-    if base_residue_table_all.empty:
-        print("[ERROR] Base residue table (all atoms) is empty.")
-        # Return empty structure matching expected output
-        return {"residue_table": pd.DataFrame(), "distance_table": pd.DataFrame(),
-                "ca_residue_table": pd.DataFrame(), "ca_distance_table": pd.DataFrame(),
-                "excluded_structures": excluded_structures_log, "error": "Empty base_residue_table_all"}
-
-
-    # 3. GRN Assignment Logic (copied & adapted from your `generate_grn_msa_tables` snippet)
-    #    This renames the sequential integer columns of the base tables to GRN labels.
-    print(f"[INFO] Assigning GRN labels to columns based on reference: {global_ref_id}")
-    ref_struct_data_for_grn = filtered_structures[global_ref_id]
-
-    # Ensure reference structure has necessary data for GRN assignment
-    ref_df_for_helices = ref_struct_data_for_grn.get('df_ca_norm', ref_struct_data_for_grn.get('df_norm'))
-    if ref_df_for_helices is None or not all(c in ref_df_for_helices.columns for c in ['helix_num', 'tm_helix', 'auth_seq_id']):
-        print(f"[ERROR] Reference {global_ref_id} lacks helix/auth_seq_id annotations in its DataFrame. Cannot assign GRNs.")
-        # Return tables with sequential columns if GRN assignment fails
-        return {"residue_table": base_residue_table_all, "distance_table": pd.DataFrame(), # Distance table needs GRN
-                "ca_residue_table": base_residue_table_ca, "ca_distance_table": pd.DataFrame(),
-                "excluded_structures": excluded_structures_log, "grn_error": "Ref annotation missing"}
-
-    # Get mapping from sequential column number to global_ref auth_seq_id
-    # This comes from create_msa_table's attrs
-    column_to_ref_auth_seq_map = base_residue_table_all.attrs.get('column_to_auth_seq', {})
-    if not column_to_ref_auth_seq_map:
-         print("[ERROR] 'column_to_auth_seq' mapping missing from base_residue_table_all. Cannot assign GRNs.")
-         return {"residue_table": base_residue_table_all, "distance_table": pd.DataFrame(),
-                 "ca_residue_table": base_residue_table_ca, "ca_distance_table": pd.DataFrame(),
-                 "excluded_structures": excluded_structures_log, "grn_error": "column_to_auth_seq missing"}
-
-
-    # --- GRN Naming Logic (Simplified from your generate_grn_msa_tables snippet) ---
-    # This part needs to be robust and match the GRN system you expect.
-    # It maps original sequential column numbers to new GRN string labels.
-
-    # A. Determine Helix Properties from Reference Structure
-    ref_helix_auth_seq_map = {} # {helix_num: [sorted auth_ids in that helix]}
-    ref_helix_boundaries = {} # {helix_num: (min_auth_id, max_auth_id)}
-
-    def sort_key_auth_id(auth_id_str_or_num): # Re-define or import if used elsewhere
-        auth_id_str = str(auth_id_str_or_num)
-        match = re.match(r"(-?\d+)([A-Za-z]*)", auth_id_str)
-        if match: num_part, letter_part = match.groups(); return (int(num_part), letter_part.upper())
-        try: return (int(auth_id_str), "")
-        except ValueError: return (float('inf'), auth_id_str.upper())
-
-    for h_num in range(1, 8):
-        helix_df = ref_df_for_helices[
-            (ref_df_for_helices['helix_num'] == h_num) & (ref_df_for_helices['tm_helix'] == True)
-        ]
-        if not helix_df.empty:
-            unique_auth_ids_in_helix = sorted(helix_df['auth_seq_id'].unique(), key=sort_key_auth_id)
-            if unique_auth_ids_in_helix:
-                ref_helix_auth_seq_map[h_num] = unique_auth_ids_in_helix
-                ref_helix_boundaries[h_num] = (unique_auth_ids_in_helix[0], unique_auth_ids_in_helix[-1])
-
-    sorted_ref_helices_by_start = sorted(ref_helix_boundaries.items(), key=lambda item: sort_key_auth_id(item[1][0]))
-
-
-    # B. Determine Pivot (X.50) for each helix in the reference
-    #    For simplicity here, using find_closest_ret_residue on the ref_struct_data_for_grn
-    #    Your more complex pivot logic from generate_grn_msa_tables (using average distances
-    #    from a preliminary distance table) could be adapted here if needed.
-    ref_helix_pivots_auth_id = {} # {h_num: pivot_auth_id}
-    for h_num in ref_helix_auth_seq_map.keys():
-        pivot_auth_id = find_closest_ret_residue(ref_struct_data_for_grn, h_num)
-        if pivot_auth_id and pivot_auth_id in ref_helix_auth_seq_map[h_num]:
-            ref_helix_pivots_auth_id[h_num] = pivot_auth_id
-            # print(f"[DEBUG] GRN: Ref Helix {h_num} pivot (closest to RET): {pivot_auth_id}")
-        else: # Fallback to geometric middle
-            middle_idx = len(ref_helix_auth_seq_map[h_num]) // 2
-            ref_helix_pivots_auth_id[h_num] = ref_helix_auth_seq_map[h_num][middle_idx]
-            # print(f"[DEBUG] GRN: Ref Helix {h_num} pivot (geometric middle): {ref_helix_pivots_auth_id[h_num]}")
-
-    # C. Generate GRN Label for each original column number
-    sequential_col_to_grn_label_map = {}
-    for seq_col_num, ref_auth_id_at_col in column_to_ref_auth_seq_map.items():
-        grn_label = f"X.{seq_col_num}" # Default if no specific GRN rule applies
-
-        # Is it in a TM helix?
-        assigned_helix_num_for_grn = None
-        for h_num_grn, auth_ids_in_h_grn in ref_helix_auth_seq_map.items():
-            if ref_auth_id_at_col in auth_ids_in_h_grn:
-                assigned_helix_num_for_grn = h_num_grn
-                break
-
-        if assigned_helix_num_for_grn and assigned_helix_num_for_grn in ref_helix_pivots_auth_id:
-            pivot_auth_id_for_helix = ref_helix_pivots_auth_id[assigned_helix_num_for_grn]
-            auth_ids_this_helix = ref_helix_auth_seq_map[assigned_helix_num_for_grn]
+    # Initialize counters
+    tm_counts = {}
+    other_counts = {'n': 0, 'c': 0, 'L': 0, 'X': 0}
+    
+    for col in df.columns:
+        col_str = str(col)
+        
+        # Check for TM helix positions in N.YY format (primary format)
+        if '.' in col_str and len(col_str.split('.')) == 2:
+            prefix, suffix = col_str.split('.')
+            if prefix.isdigit() and int(prefix) >= 1 and int(prefix) <= 7:
+                # This is a TM helix position in N.YY format
+                tm_counts[prefix] = tm_counts.get(prefix, 0) + 1
+            elif prefix == 'n':
+                other_counts['n'] += 1
+            elif prefix == 'c':
+                other_counts['c'] += 1
+            elif prefix == 'L':
+                other_counts['L'] += 1
+            elif prefix == 'X':
+                other_counts['X'] += 1
+            elif len(prefix) == 2 and prefix.isdigit():
+                # This is likely a loop region in AB.CCC format
+                other_counts['L'] += 1
+            else:
+                other_counts['X'] += 1
+        
+        # Check for TM helix positions in NxYY format (for backward compatibility)
+        elif 'x' in col_str:
             try:
-                current_idx_in_helix = auth_ids_this_helix.index(ref_auth_id_at_col)
-                pivot_idx_in_helix = auth_ids_this_helix.index(pivot_auth_id_for_helix)
-                offset = current_idx_in_helix - pivot_idx_in_helix
-                grn_label = f"{assigned_helix_num_for_grn}.{50 + offset}"
-            except ValueError: # Should not happen if data is consistent
-                print(f"[WARN] GRN: Value error for {ref_auth_id_at_col} in helix {assigned_helix_num_for_grn}")
-
-        # Is it N-term, C-term, or Loop? (Only if not already assigned as TM helix)
-        elif sorted_ref_helices_by_start: # Need at least one defined helix
-            first_helix_num, (first_helix_start_auth_id, _) = sorted_ref_helices_by_start[0]
-            last_helix_num, (_, last_helix_end_auth_id) = sorted_ref_helices_by_start[-1]
-
-            key_ref_auth = sort_key_auth_id(ref_auth_id_at_col)
-            key_first_start = sort_key_auth_id(first_helix_start_auth_id)
-            key_last_end = sort_key_auth_id(last_helix_end_auth_id)
-
-            if key_ref_auth < key_first_start: # N-terminal
-                # Distance needs to be calculated based on numeric part of auth_seq_id
-                dist_n = key_first_start[0] - key_ref_auth[0] if isinstance(key_first_start[0], int) and isinstance(key_ref_auth[0], int) else seq_col_num
-                grn_label = f"n.{dist_n}"
-            elif key_ref_auth > key_last_end: # C-terminal
-                dist_c = key_ref_auth[0] - key_last_end[0] if isinstance(key_last_end[0], int) and isinstance(key_ref_auth[0], int) else seq_col_num
-                grn_label = f"c.{dist_c}"
-            else: # Loop
-                is_loop = False
-                for i in range(len(sorted_ref_helices_by_start) - 1):
-                    prev_h_num_loop, (_, prev_h_end_auth) = sorted_ref_helices_by_start[i]
-                    next_h_num_loop, (next_h_start_auth, _) = sorted_ref_helices_by_start[i+1]
-
-                    key_prev_end = sort_key_auth_id(prev_h_end_auth)
-                    key_next_start = sort_key_auth_id(next_h_start_auth)
-
-                    if key_prev_end < key_ref_auth < key_next_start:
-                        # Distance from end of previous helix (numeric part)
-                        dist_loop = key_ref_auth[0] - key_prev_end[0] if isinstance(key_ref_auth[0], int) and isinstance(key_prev_end[0], int) else seq_col_num
-                        grn_label = f"{prev_h_num_loop}{next_h_num_loop}.{dist_loop:03d}" # AB.CCC format
-                        is_loop = True
-                        break
-                if not is_loop: grn_label = f"L.{seq_col_num}" # Fallback general loop
-
-        sequential_col_to_grn_label_map[seq_col_num] = grn_label
-
-    # D. Apply GRN labels to table columns
-    final_grn_column_labels = [sequential_col_to_grn_label_map.get(col_num, f"X.{col_num}") for col_num in base_residue_table_all.columns]
-
-    residue_table_grn_final = base_residue_table_all.copy()
-    residue_table_grn_final.columns = final_grn_column_labels
-
-    ca_residue_table_grn_final = base_residue_table_ca.copy()
-    if len(ca_residue_table_grn_final.columns) == len(final_grn_column_labels):
-        ca_residue_table_grn_final.columns = final_grn_column_labels
-    else:
-        print(f"[WARN] CA residue table column count mismatch. Retaining sequential numbers for CA table.")
-        # ca_residue_table_grn_final remains with sequential columns
-
-    # Sort columns by GRN
-    residue_table_grn_final = sort_grn_columns(residue_table_grn_final)
-    if list(ca_residue_table_grn_final.columns) == list(residue_table_grn_final.columns): # Check if cols were successfully renamed
-        ca_residue_table_grn_final = sort_grn_columns(ca_residue_table_grn_final)
-
-
-    # 4. Create Distance Tables using the NEW GRN-labeled residue tables as template
-    print("[INFO] Creating GRN-labeled distance tables...")
-    distance_table_grn_final = create_msa_distance_table(
-        filtered_seq_alignments, # These are used by create_msa_table *inside* create_msa_distance_table
-        filtered_structures,     # if it reconstructs the base alignment.
-        global_ref_id,           # Better: pass the GRN labeled table directly.
-        residue_table_grn_final, # Pass the GRN labeled residue table
-        distance_type="sidechain"
-    )
-
-    ca_distance_table_grn_final = create_msa_distance_table(
-        filtered_seq_alignments,
-        filtered_structures,
-        global_ref_id,
-        ca_residue_table_grn_final, # Pass GRN labeled CA residue table
-        distance_type="backbone"
-    )
-
-    # Ensure distance tables are sorted consistently with residue tables
-    distance_table_grn_final = sort_grn_columns(distance_table_grn_final.reindex(columns=residue_table_grn_final.columns))
-    if not ca_residue_table_grn_final.empty:
-         ca_distance_table_grn_final = sort_grn_columns(ca_distance_table_grn_final.reindex(columns=ca_residue_table_grn_final.columns))
-
-
-    # 5. Save outputs
-    os.makedirs(output_dir, exist_ok=True)
-    try:
-        residue_table_grn_final.to_csv(os.path.join(output_dir, "residue_table_grn.csv"))
-        distance_table_grn_final.to_csv(os.path.join(output_dir, "distance_table_grn.csv"))
-        if not ca_residue_table_grn_final.empty:
-            ca_residue_table_grn_final.to_csv(os.path.join(output_dir, "ca_residue_table_grn.csv"))
-        if not ca_distance_table_grn_final.empty:
-            ca_distance_table_grn_final.to_csv(os.path.join(output_dir, "ca_distance_table_grn.csv"))
-
-        # Save other metadata if needed (e.g., the sequential_col_to_grn_label_map for debugging)
-        # with open(os.path.join(output_dir, "grn_mapping_details.pkl"), "wb") as f:
-        #     pickle.dump({
-        #         "sequential_col_to_ref_auth_seq": column_to_ref_auth_seq_map,
-        #         "sequential_col_to_grn_label": sequential_col_to_grn_label_map
-        #     }, f)
-        print(f"[INFO] GRN tables saved to {output_dir}")
-    except Exception as e_save:
-        print(f"[WARN] Error saving GRN tables: {e_save}")
-
-    return {
-        "residue_table": residue_table_grn_final,
-        "distance_table": distance_table_grn_final,
-        "ca_residue_table": ca_residue_table_grn_final,
-        "ca_distance_table": ca_distance_table_grn_final,
-        "excluded_structures": excluded_structures_log
-        # Add other relevant outputs like helix_stats if calculated here
-    }
-
-
-# --- calculate_helix_distances, count_residues_by_helix ---
-# These helper functions can remain as they are, as they operate on GRN-labeled DataFrames.
-
-def calculate_helix_distances(distance_table_grn): # Renamed arg for clarity
-    if distance_table_grn.empty: return {}
-    mean_distances = distance_table_grn.mean(skipna=True)
-    std_distances = distance_table_grn.std(skipna=True)
-    helix_stats = {}
-    for grn_pos_label in distance_table_grn.columns:
-        pos_str = str(grn_pos_label)
-        match_tm = re.match(r"(\d+)\.([\d\.]+)", pos_str) # Matches "1.50" and "1.501"
-        if match_tm:
-            helix, pos_val_str = match_tm.groups()
-            if 1 <= int(helix) <= 7:
-                if helix not in helix_stats:
-                    helix_stats[helix] = {'positions': [], 'means': [], 'stds': []}
-                helix_stats[helix]['positions'].append(grn_pos_label) # Store original GRN label
-                helix_stats[helix]['means'].append(mean_distances.get(grn_pos_label, np.nan))
-                helix_stats[helix]['stds'].append(std_distances.get(grn_pos_label, np.nan))
-
-    for helix_key, data_val in helix_stats.items():
-        # Sort by the numeric part of the position
-        def get_pos_float(p_str):
-            try: return float(str(p_str).split('.',1)[1])
-            except: return float('inf') # Error last
-
-        sorted_indices = sorted(range(len(data_val['positions'])), key=lambda i: get_pos_float(data_val['positions'][i]))
-        data_val['positions'] = [data_val['positions'][i] for i in sorted_indices]
-        data_val['means'] = [data_val['means'][i] for i in sorted_indices]
-        data_val['stds'] = [data_val['stds'][i] for i in sorted_indices]
-
-        # Find closest position based on mean distance
-        if data_val['means'] and not all(np.isnan(m) for m in data_val['means']):
-            valid_means_with_indices = [(mean, idx) for idx, mean in enumerate(data_val['means']) if pd.notna(mean)]
-            if valid_means_with_indices:
-                min_mean, min_idx_in_valid = min(valid_means_with_indices, key=lambda x: x[0])
-                original_min_idx = valid_means_with_indices[min_idx_in_valid][1] # map back to original list index
-                data_val['closest_position'] = data_val['positions'][original_min_idx]
-                data_val['closest_mean'] = min_mean
-            else:
-                data_val['closest_position'] = None; data_val['closest_mean'] = None
+                helix, pos = col_str.split('x')
+                if helix.isdigit() and int(helix) >= 1 and int(helix) <= 7:
+                    tm_counts[helix] = tm_counts.get(helix, 0) + 1
+                else:
+                    other_counts['X'] += 1
+            except:
+                other_counts['X'] += 1
+        
+        # Any other format
         else:
-            data_val['closest_position'] = None; data_val['closest_mean'] = None
-    return helix_stats
-
-def count_residues_by_helix(df_grn_labeled): # Renamed arg
-    if df_grn_labeled.empty: return {'tm_total': 0, 'helices': {}, 'other': {'n': 0, 'c': 0, 'L': 0, 'X': 0}}
-    tm_counts = {str(h):0 for h in range(1,8)}
-    other_counts = {'n': 0, 'c': 0, 'L': 0, 'X': 0} # L for general loops, X for unknown
-
-    for grn_col in df_grn_labeled.columns:
-        col_str = str(grn_col)
-        if col_str.startswith('n.'): other_counts['n'] += 1
-        elif col_str.startswith('c.'): other_counts['c'] += 1
-        elif re.match(r"(\d{1,2})(\d{1,2})\.(\d+)", col_str): other_counts['L'] +=1 # Loop AB.CCC
-        elif col_str.startswith('L.'): other_counts['L'] +=1 # General Loop L.X
-        elif re.match(r"(\d+)\.([\d\.]+)", col_str): # TM Helix like 1.50 or 1.501
-            helix_part = col_str.split('.')[0]
-            if helix_part.isdigit() and 1 <= int(helix_part) <= 7:
-                tm_counts[helix_part] = tm_counts.get(helix_part, 0) + 1
-            else:
-                other_counts['X'] += 1 # Non-standard helix number
-        else: # Fallback for other formats like I.X, ERR_I.X, X.sequential
             other_counts['X'] += 1
-
-    return {
+    
+    result = {
         'tm_total': sum(tm_counts.values()),
         'helices': tm_counts,
         'other': other_counts
     }
+    
+    return result
 
+def sort_grn_columns(df):
+    """
+    Sorts columns of a GRN-labeled DataFrame in the correct order based on GRN system.
+    
+    The order follows the GRN system:
+    1. N-terminal (n.XX) 
+    2. TM helices in order (1xYY through 7xYY, with positions sorted numerically)
+    3. Loop regions (AB.CCC)
+    4. C-terminal regions (c.XX)
+    5. Any other labels
+    
+    Args:
+        df: DataFrame with GRN column labels
+        
+    Returns:
+        DataFrame: DataFrame with sorted columns
+    """
+    # Function to convert GRN label to a float value for consistent sorting
+    def grn_to_sortable_value(label):
+        if not isinstance(label, str):
+            return 999.999  # Default high value for non-string labels
+        
+        # N-terminal: convert to negative value
+        if label.startswith('n.'):
+            try:
+                distance = float(label.split('.')[1])
+                return -0.01 * distance  # Negative value to sort before TM regions
+            except (IndexError, ValueError):
+                return -0.001  # Default for malformed n.XX
+        
+        # C-terminal: convert to high value
+        if label.startswith('c.'):
+            try:
+                distance = float(label.split('.')[1])
+                return 100.0 + (0.01 * distance)  # High value to sort after loops
+            except (IndexError, ValueError):
+                return 100.001  # Default for malformed c.XX
+        
+        # TM helices with dot notation (prioritize this format)
+        match_dot = re.match(r'(\d+)\.(\d+)$', label)
+        if match_dot and len(match_dot.groups()) == 2:
+            helix, pos = match_dot.groups()
+            # Make sure helices 1-7 are properly ordered
+            if int(helix) >= 1 and int(helix) <= 7:
+                return float(label)
+        
+        # TM helices with x notation: convert to helix.position format (for backward compatibility)
+        match_x = re.match(r'(\d+)x(\d+)', label)
+        if match_x:
+            helix, pos = match_x.groups()
+            return float(f"{helix}.{pos}")
+        
+        # Loop regions: AB.CCC format
+        match_loop = re.match(r'(\d+)(\d+)\.(\d+)', label)
+        if match_loop:
+            closer_helix, further_helix, distance = match_loop.groups()
+            # Scale the distance to be between the helix numbers
+            return float(f"{closer_helix}{further_helix}.{distance}")
+        
+        # General loop label (L.X)
+        if label.startswith('L.'):
+            try:
+                pos = float(label.split('.')[1])
+                return 90.0 + (0.01 * pos)  # Sort between loops and C-terminal
+            except (IndexError, ValueError):
+                return 90.001  # Default for malformed L.X
+            
+        # Any other format: sort at the end
+        return 999.999
+    
+    # Sort columns
+    try:
+        sorted_columns = sorted(df.columns, key=grn_to_sortable_value)
+        return df[sorted_columns]
+    except Exception as e:
+        print(f"[WARNING] Error sorting GRN columns: {e}")
+        # Fall back to original order
+        return df
+
+def create_msa_distance_table(seq_alignment_dicts, processed_structures_complete, global_ref,
+                              distance_type="sidechain"):
+    """
+    Creates a distance table showing the closest distance from each residue to retinal.
+    
+    Args:
+        seq_alignment_dicts: Dictionary with sequence alignments
+        processed_structures_complete: Dictionary with structure data
+        global_ref: ID of global reference structure
+        distance_type: Either "sidechain" (closest atom) or "backbone" (CA atoms only)
+        
+    Returns:
+        DataFrame: Distance table
+    """
+    from scipy.spatial.distance import cdist
+    
+    # First, create the alignment table to get the position mapping
+    msa_df = create_msa_table(
+        seq_alignment_dicts, 
+        processed_structures_complete, 
+        global_ref,
+        atom_type="CA" if distance_type == "backbone" else "all"
+    )
+    
+    column_to_auth_seq = msa_df.attrs.get('column_to_auth_seq', {})
+    
+    distances = {}
+    for struct_id in msa_df.index:
+        if struct_id not in processed_structures_complete or 'df_norm' not in processed_structures_complete[struct_id]:
+            distances[struct_id] = {col: float('nan') for col in msa_df.columns}
+            print(f"[DEBUG] Structure {struct_id} missing or lacks df_norm, setting all distances to NaN")
+            continue
+        
+        struct = processed_structures_complete[struct_id]
+        df_norm = struct['df_norm']
+        
+        # First try 'RET'
+        ret_df = df_norm[df_norm['res_name3l'] == 'RET']
+        
+        # If not found, try 'LIG'
+        if ret_df.empty:
+            lig_df = df_norm[df_norm['res_name3l'] == 'LIG']
+            if not lig_df.empty:
+                # Rename 'LIG' to 'RET' for consistency
+                df_norm.loc[df_norm['res_name3l'] == 'LIG', 'res_name3l'] = 'RET'
+                ret_df = df_norm[df_norm['res_name3l'] == 'RET']
+                print(f"[INFO] Renamed 'LIG' to 'RET' in structure {struct_id}")
+        
+        if ret_df.empty:
+            print(f"[DEBUG] No retinal (RET or LIG) found for structure {struct_id}, setting all distances to NaN")
+            distances[struct_id] = {col: float('nan') for col in msa_df.columns}
+            continue
+        
+        # Parse auth_seq_id in the structure for consistency
+        # First make an explicit copy to avoid the SettingWithCopyWarning
+        if distance_type == "backbone":
+            res_df = struct['df_ca_norm'].copy()
+        else:
+            res_df = df_norm[df_norm['res_name3l'] != 'RET'].copy()
+            
+        # Now modify the copy (this avoids the warning)
+        res_df['numeric_seq_id'] = res_df['auth_seq_id'].apply(lambda x: int(x) if str(x).isdigit() else x)
+
+        struct_distances = {col: float('nan') for col in msa_df.columns}
+        ret_coords = ret_df[['x', 'y', 'z']].values
+        
+        for col in msa_df.columns:
+            cell_value = msa_df.at[struct_id, col]
+            if cell_value == '-':
+                # Gap in the alignment
+                continue
+            
+            try:
+                # Extract auth_seq_id from cell_value
+                digit_part = ''.join(c for c in cell_value if c.isdigit())
+                if not digit_part:
+                    continue
+                
+                ref_numeric_id = int(digit_part)
+                
+                # Find this residue in the structure using numeric_seq_id
+                residue_atoms = res_df[res_df['numeric_seq_id'] == ref_numeric_id]
+                if residue_atoms.empty:
+                    continue
+                
+                res_coords = residue_atoms[['x', 'y', 'z']].values
+                distances_matrix = cdist(res_coords, ret_coords)
+                min_distance = float(distances_matrix.min())
+                
+                struct_distances[col] = min_distance
+            except Exception as e:
+                print(f"[WARNING] Error calculating distance for {struct_id}, column {col}: {e}")
+                continue
+        
+        distances[struct_id] = struct_distances
+    
+    distance_df = pd.DataFrame(distances).T
+    distance_df = distance_df[msa_df.columns]
+    distance_df.attrs['column_to_auth_seq'] = column_to_auth_seq
+    
+    return distance_df
+
+def find_closest_ret_residue(struct, helix_num):
+    """
+    Find the auth_seq_id of the residue closest to retinal in a specific helix.
+    This can be used as the X.50 reference point.
+    
+    Args:
+        struct: Structure data dictionary
+        helix_num: Helix number to analyze
+        
+    Returns:
+        auth_seq_id of closest residue or None if not found
+    """
+    from scipy.spatial.distance import cdist
+    
+    if 'df_norm' not in struct:
+        return None
+    
+    df_norm = struct['df_norm']
+    
+    # Find RET
+    if 'res_name3l' not in df_norm.columns:
+        return None
+    
+    # Try 'RET'
+    ret_df = df_norm[df_norm['res_name3l'] == 'RET']
+    
+    # If not found, try 'LIG'
+    if ret_df.empty:
+        lig_df = df_norm[df_norm['res_name3l'] == 'LIG']
+        if not lig_df.empty:
+            # Rename 'LIG' to 'RET' for consistency
+            df_norm.loc[df_norm['res_name3l'] == 'LIG', 'res_name3l'] = 'RET'
+            ret_df = df_norm[df_norm['res_name3l'] == 'RET']
+            print(f"[INFO] Renamed 'LIG' to 'RET' in structure for closest residue calculation")
+    
+    if ret_df.empty:
+        return None
+    
+    # Find residues in the specified helix
+    helix_df = df_norm[(df_norm['helix_num'] == helix_num) &
+                       (df_norm['tm_helix'] == True) &
+                       (df_norm['res_name3l'] != 'RET')]
+    
+    if helix_df.empty:
+        print("did not find residues with specified helix in df_norm")
+        return None
+    
+    # Group by residue (auth_seq_id)
+    min_distance = float('inf')
+    closest_auth_seq = None
+    
+    # Calculate distances from each residue to RET
+    for auth_seq, group in helix_df.groupby('auth_seq_id'):
+        # Get coordinates for this residue
+        res_coords = group[['x', 'y', 'z']].values
+        
+        # Get coordinates for RET
+        ret_coords = ret_df[['x', 'y', 'z']].values
+        
+        # Calculate minimum distance
+        distances = cdist(res_coords, ret_coords)
+        min_dist = distances.min()
+        
+        if min_dist < min_distance:
+            min_distance = min_dist
+            closest_auth_seq = auth_seq
+    
+    return closest_auth_seq
+
+def create_grn_column_mapping(ref_struct, original_columns):
+    """
+    Creates a mapping from sequential column numbers to GRN notation based on
+    helix assignments in the reference structure, following the Generic Residue
+    Numbering (GRN) system.
+    
+    Args:
+        ref_struct: Reference structure data with df_ca_norm containing helix annotations
+        original_columns: Original column numbers to be mapped
+        
+    Returns:
+        dict: Mapping from original columns to GRN labels
+    """
+    if 'df_ca_norm' not in ref_struct:
+        print("[ERROR] Reference structure lacks df_ca_norm")
+        return {}
+    
+    ref_df = ref_struct['df_ca_norm']
+    
+    if 'helix_num' not in ref_df.columns or 'tm_helix' not in ref_df.columns:
+        print("[ERROR] Reference structure lacks helix annotations")
+        return {}
+    
+    # Convert original_columns to integers
+    original_columns = [int(col) for col in original_columns]
+    
+    # Create a mapping from column number to auth_seq_id
+    column_to_auth_seq = {}
+    auth_seq_ids = sorted(ref_df['auth_seq_id'].unique())
+    
+    for i, auth_seq in enumerate(auth_seq_ids, 1):
+        if i in original_columns:
+            column_to_auth_seq[i] = auth_seq
+    
+    # Create a mapping from auth_seq_id to GRN label
+    grn_mapping = {}
+    
+    # Process each transmembrane helix
+    for helix_num in range(1, 8):  # 7TM proteins have 7 helices
+        helix_df = ref_df[(ref_df['helix_num'] == helix_num) &
+                          (ref_df['tm_helix'] == True)]
+        
+        if helix_df.empty:
+            print(f"[WARNING] No TM helix {helix_num} found in reference structure")
+            continue
+        
+        # Get auth_seq_ids for this helix in sequence order
+        helix_auth_seqs = sorted(helix_df['auth_seq_id'].unique())
+        
+        if len(helix_auth_seqs) == 0:
+            continue
+        
+        # Find the closest residue to RET as per GRN system (X.50 position)
+        closest_to_ret = find_closest_ret_residue(ref_struct, helix_num)
+        
+        if closest_to_ret is not None and closest_to_ret in helix_auth_seqs:
+            # Use this as the X.50 reference point as recommended in GRN system
+            middle_auth_seq = closest_to_ret
+            print(f"[INFO] Helix {helix_num}: Found residue {middle_auth_seq} (closest to RET) as {helix_num}.50")
+        else:
+            # Fallback to geometric center if retinal reference isn't available
+            middle_idx = len(helix_auth_seqs) // 2
+            middle_auth_seq = helix_auth_seqs[middle_idx]
+            print(f"[INFO] Helix {helix_num}: Using geometric center residue {middle_auth_seq} as {helix_num}.50")
+        
+        # Map helix residues to their GRN labels
+        try:
+            middle_idx = helix_auth_seqs.index(middle_auth_seq)
+        except ValueError:
+            print(f"[WARNING] Could not find middle residue {middle_auth_seq} in helix {helix_num}")
+            continue
+        
+        # Assign GRN labels using standard N.YY format (e.g., 1.50, 1.51, 1.52, etc.)
+        # instead of Nx<YY> format to match your desired output
+        for i, auth_seq in enumerate(helix_auth_seqs):
+            offset = i - middle_idx
+            # Use N.<YY> format for transmembrane helices
+            grn_label = f"{helix_num}.{50 + offset}"
+            
+            # Find which column corresponds to this auth_seq_id
+            for col, seq_id in column_to_auth_seq.items():
+                if seq_id == auth_seq:
+                    grn_mapping[col] = grn_label
+                    break
+    
+    # Now handle loop regions and terminal regions
+    # First, identify all TM helices and their boundaries
+    helices = []
+    for helix_num in range(1, 8):
+        helix_df = ref_df[(ref_df['helix_num'] == helix_num) & (ref_df['tm_helix'] == True)]
+        if not helix_df.empty:
+            helix_seqs = sorted(helix_df['auth_seq_id'].unique())
+            if helix_seqs:
+                helices.append((helix_num, min(helix_seqs), max(helix_seqs)))
+    
+    # Sort helices by position
+    helices.sort(key=lambda x: x[1])
+    
+    # Process remaining columns that aren't TM helices
+    loop_counters = {}  # Track loop counters for each loop region
+    
+    for col in original_columns:
+        if col in grn_mapping:
+            continue  # Skip already assigned TM helix positions
+            
+        # Get the auth_seq_id for this column
+        auth_seq = column_to_auth_seq.get(col)
+        if auth_seq is None:
+            continue
+            
+        # Find appropriate loop/terminal region
+        if helices and auth_seq < helices[0][1]:
+            # N-terminal region: use 'n.XX' format
+            distance = helices[0][1] - auth_seq
+            grn_mapping[col] = f"n.{distance}"
+        elif helices and auth_seq > helices[-1][2]:
+            # C-terminal region: use 'c.XX' format
+            distance = auth_seq - helices[-1][2]
+            grn_mapping[col] = f"c.{distance}"
+        else:
+            # Loop region between helices: use 'AB.CCC' format according to GRN system
+            for i in range(len(helices)-1):
+                prev_helix, _, prev_end = helices[i]
+                next_helix, next_start, _ = helices[i+1]
+                
+                if prev_end < auth_seq < next_start:
+                    # This is a loop between prev_helix and next_helix
+                    
+                    # Calculate distance from each helix
+                    dist_to_prev = auth_seq - prev_end
+                    dist_to_next = next_start - auth_seq
+                    
+                    # Determine which helix is closer
+                    if dist_to_prev <= dist_to_next:
+                        # Closer to prev_helix
+                        closer_helix = prev_helix
+                        further_helix = next_helix
+                        distance = dist_to_prev
+                    else:
+                        # Closer to next_helix
+                        closer_helix = next_helix
+                        further_helix = prev_helix
+                        distance = dist_to_next
+                    
+                    # Create loop key with closer helix first
+                    loop_key = f"{closer_helix}{further_helix}"
+                    
+                    # Initialize counter if not present
+                    if loop_key not in loop_counters:
+                        loop_counters[loop_key] = 1
+                    
+                    # Format as AB.CCC where:
+                    # - A is the closer helix
+                    # - B is the further helix
+                    # - CCC is the three-digit distance (with leading zeros)
+                    grn_mapping[col] = f"{closer_helix}{further_helix}.{distance:03d}"
+                    
+                    # Increment counter for this loop region
+                    loop_counters[loop_key] += 1
+                    break
+            else:
+                # If not found in any loop, use a general loop label (fallback)
+                if col not in grn_mapping:
+                    grn_mapping[col] = f"L.{col}"
+    
+    print(f"[INFO] Created GRN mapping for {len(grn_mapping)} positions with proper GRN notation")
+    return grn_mapping
+
+def assign_helix_numbers_to_msa_tables(tables_dict, structure_data, reference_id):
+    """
+    Directly assigns helix numbers to MSA table columns based on the reference structure.
+    
+    Args:
+        tables_dict: Dictionary with MSA tables
+        structure_data: Dictionary with structure data
+        reference_id: ID of the reference structure
+        
+    Returns:
+        dict: Updated dictionary with tables having proper helix numbering
+    """
+    if reference_id not in structure_data:
+        print(f"[ERROR] Reference structure {reference_id} not found")
+        return tables_dict
+    
+    ref_struct = structure_data[reference_id]
+    if 'df_ca_norm' not in ref_struct or 'helix_num' not in ref_struct['df_ca_norm'].columns:
+        print(f"[ERROR] Reference structure lacks helix annotations")
+        return tables_dict
+    
+    ref_df = ref_struct['df_ca_norm']
+    
+    # Create mapping from auth_seq_id to helix number
+    auth_seq_to_helix = {}
+    auth_seq_to_position = {}
+    
+    for helix_num in range(1, 8):
+        tm_df = ref_df[(ref_df['helix_num'] == helix_num) & (ref_df['tm_helix'] == True)]
+        auth_seqs = sorted(tm_df['auth_seq_id'].unique())
+        
+        if not auth_seqs:
+            continue
+        
+        # Find the closest residue to retinal as the X.50 reference
+        closest_to_ret = find_closest_ret_residue(ref_struct, helix_num)
+        
+        if closest_to_ret is not None and closest_to_ret in auth_seqs:
+            middle_auth_seq = closest_to_ret
+            print(f"[INFO] Helix {helix_num}: Found residue {middle_auth_seq} (closest to RET) as {helix_num}.50")
+        else:
+            middle_idx = len(auth_seqs) // 2
+            middle_auth_seq = auth_seqs[middle_idx]
+            print(f"[INFO] Helix {helix_num}: Using geometric center residue {middle_auth_seq} as {helix_num}.50")
+        
+        # Get the middle index
+        try:
+            middle_idx = auth_seqs.index(middle_auth_seq)
+        except ValueError:
+            print(f"[WARNING] Could not find middle residue {middle_auth_seq} in helix {helix_num}")
+            middle_idx = len(auth_seqs) // 2
+        
+        # Map all residues in this helix with positions relative to middle (X.50)
+        for i, auth_seq in enumerate(auth_seqs):
+            offset = i - middle_idx
+            position = f"{helix_num}.{50 + offset}"
+            auth_seq_to_helix[auth_seq] = helix_num
+            auth_seq_to_position[auth_seq] = position
+    
+    # Get the mapping from column positions to auth_seq_ids
+    for table_name, table in tables_dict.items():
+        if not isinstance(table, pd.DataFrame) or not hasattr(table, 'attrs'):
+            continue
+            
+        column_to_auth_seq = table.attrs.get('column_to_auth_seq', {})
+        if not column_to_auth_seq:
+            print(f"[WARNING] Table {table_name} has no column_to_auth_seq mapping")
+            continue
+            
+        # Create new column names
+        new_columns = []
+        
+        for col in table.columns:
+            auth_seq = column_to_auth_seq.get(int(col) if isinstance(col, (int, float)) else col)
+            
+            if auth_seq is not None and auth_seq in auth_seq_to_position:
+                # This is a TM helix position
+                new_columns.append(auth_seq_to_position[auth_seq])
+            else:
+                # Not in any TM helix or not mapped
+                new_columns.append(f"X.{col}")
+        
+        # Apply new column names
+        if len(new_columns) == len(table.columns):
+            tables_dict[table_name].columns = new_columns
+            print(f"[INFO] Applied helix numbering to {table_name} table")
+    
+    return tables_dict
+
+def calculate_helix_distances(distance_table):
+    """
+    Calculate the mean and standard deviation of distances to retinal for each position,
+    grouped by helix, using the GRN column names (N.YY format).
+    
+    Args:
+        distance_table: DataFrame with distances (columns are GRN positions)
+        
+    Returns:
+        dict: Dictionary with helix statistics
+    """
+    # Calculate column means and std deviations
+    mean_distances = distance_table.mean(skipna=True)
+    std_distances = distance_table.std(skipna=True)
+    
+    # Group by helix
+    helix_stats = {}
+    
+    for position in mean_distances.index:
+        pos_str = str(position)
+        
+        # Process TM helix positions in N.YY format
+        if '.' in pos_str and len(pos_str.split('.')) == 2:
+            prefix, suffix = pos_str.split('.')
+            
+            # Check if this is a TM helix position
+            if prefix.isdigit() and int(prefix) >= 1 and int(prefix) <= 7:
+                helix = prefix
+                pos_num = float(suffix)
+                
+                if helix not in helix_stats:
+                    helix_stats[helix] = {'positions': [], 'means': [], 'stds': []}
+                
+                helix_stats[helix]['positions'].append(position)
+                helix_stats[helix]['means'].append(mean_distances[position])
+                helix_stats[helix]['stds'].append(std_distances[position])
+                
+    # Sort positions within each helix and find closest position
+    for helix, data in helix_stats.items():
+        # Sort by position number
+        sorted_idx = sorted(range(len(data['positions'])), 
+                          key=lambda i: float(str(data['positions'][i]).split('.')[1]))
+        
+        data['positions'] = [data['positions'][i] for i in sorted_idx]
+        data['means'] = [data['means'][i] for i in sorted_idx]
+        data['stds'] = [data['stds'][i] for i in sorted_idx]
+        
+        # Find the position with minimum mean distance
+        if data['means']:
+            min_idx = data['means'].index(min(data['means']))
+            data['closest_position'] = data['positions'][min_idx]
+            data['closest_mean'] = data['means'][min_idx]
+        else:
+            data['closest_position'] = None
+            data['closest_mean'] = None
+    
+    return helix_stats
+
+def generate_grn_msa_tables(seq_alignment_dicts, processed_structures_complete, global_ref,
+                         rmsd_df=None, max_rmsd_threshold=3.0, structure_mapping=None):
+    """
+    Creates all MSA tables with proper GRN (Generic Residue Numbering) column names.
+    This function is a critical component for standardized analysis of membrane proteins:
+    1. Creates tables showing sequence alignments and distances to retinal
+    2. Applies Generic Residue Numbering (GRN) to enable direct comparison between structures
+    3. Uses the "X.50" numbering convention where X is the helix number and 50 is the reference position
+    4. Anchors each helix using the residue closest to retinal as the X.50 position
+    5. Filters structures with RMSD > threshold relative to global reference
+    6. Prioritizes experimental structures over predicted ones when both are available
+
+    Args:
+        seq_alignment_dicts: Dictionary with sequence alignments
+        processed_structures_complete: Dictionary with structure data
+        global_ref: ID of global reference structure
+        rmsd_df: Optional DataFrame with RMSD values between structures
+        max_rmsd_threshold: Maximum RMSD to global reference for inclusion (default: 3.0)
+        structure_mapping: Optional mapping from experimental to predicted structures
+
+    Returns:
+        dict: Dictionary with tables using GRN column names
+    """
+    # Filter structures by RMSD to global reference if rmsd_df is provided
+    filtered_structures = processed_structures_complete.copy()
+    filtered_seq_alignments = {
+        'global': seq_alignment_dicts.get('global', {}).copy(),
+        'type': seq_alignment_dicts.get('type', {}).copy()
+    }
+
+    # Initialize excluded_structures for tracking filtered structures
+    excluded_structures = []
+
+    # Step 1: First prioritize experimental structures over predicted ones
+    if structure_mapping:
+        print(f"[INFO] Prioritizing experimental structures over predicted ones using structure mapping")
+
+        # Identify predicted structures that have experimental counterparts
+        predicted_with_exp = set()
+        for exp_id, pred_id in structure_mapping.items():
+            # Handle different mapping formats
+            if isinstance(pred_id, dict) and 'predicted' in pred_id:
+                pred_id = pred_id['predicted']
+
+            # If both experimental and predicted structures exist, prioritize experimental
+            if exp_id in filtered_structures and pred_id in filtered_structures:
+                predicted_with_exp.add(pred_id)
+
+        # Remove predicted structures that have experimental counterparts
+        for pred_id in predicted_with_exp:
+            if pred_id in filtered_structures:
+                excluded_structures.append(pred_id)
+                del filtered_structures[pred_id]
+                # Also remove from sequence alignments
+                if pred_id in filtered_seq_alignments['global']:
+                    del filtered_seq_alignments['global'][pred_id]
+                # Also check in type alignments
+                for type_ref, type_aligns in filtered_seq_alignments['type'].items():
+                    if pred_id in type_aligns:
+                        del type_aligns[pred_id]
+
+        print(f"[INFO] Excluded {len(predicted_with_exp)} predicted structures that have experimental counterparts")
+
+    # Step 2: Filter structures based on RMSD threshold
+    if rmsd_df is not None and global_ref in rmsd_df.index:
+        print(f"[INFO] Filtering structures with RMSD > {max_rmsd_threshold}Å to reference {global_ref}")
+
+        # Get structures with RMSD > threshold
+        rmsd_excluded = []
+        rmsd_values = {}
+        for struct_id in list(filtered_structures.keys()):  # Use list to avoid modification during iteration
+            if struct_id == global_ref:
+                continue  # Always include the reference
+
+            if struct_id in rmsd_df.index and global_ref in rmsd_df.columns:
+                rmsd = rmsd_df.loc[struct_id, global_ref]
+                if pd.isna(rmsd) or rmsd > max_rmsd_threshold:
+                    rmsd_excluded.append(struct_id)
+                    rmsd_values[struct_id] = rmsd if not pd.isna(rmsd) else "NaN"
+                    # Remove from filtered structures
+                    if struct_id in filtered_structures:
+                        del filtered_structures[struct_id]
+                    # Remove from sequence alignments
+                    if struct_id in filtered_seq_alignments['global']:
+                        del filtered_seq_alignments['global'][struct_id]
+                    # Also check in type alignments
+                    for type_ref, type_aligns in filtered_seq_alignments['type'].items():
+                        if struct_id in type_aligns:
+                            del type_aligns[struct_id]
+
+        # Add RMSD-excluded structures to the overall excluded list
+        excluded_structures.extend(rmsd_excluded)
+
+        print(f"[INFO] Excluded {len(rmsd_excluded)} structures with RMSD > {max_rmsd_threshold}Å")
+        # Debug: Print the excluded structures with their RMSD values
+        if rmsd_excluded:
+            print(f"[DEBUG] High RMSD structures: " + ", ".join([f"{sid} ({rmsd_values[sid]:.2f}Å)" if isinstance(rmsd_values[sid], float) else f"{sid} ({rmsd_values[sid]})" for sid in rmsd_excluded]))
+
+        # Show overall exclusion statistics
+        print(f"[INFO] Total excluded structures: {len(excluded_structures)}")
+        if excluded_structures:
+            print(f"[INFO] Excluded structures: {', '.join(excluded_structures[:10])}" +
+                  (f"... and {len(excluded_structures)-10} more" if len(excluded_structures) > 10 else ""))
+        print(f"[INFO] Using {len(filtered_structures)} structures for MSA table generation")
+
+    # First create the tables with sequential numbering
+    print("[INFO] Creating standard MSA table...")
+    residue_table = create_msa_table(filtered_seq_alignments, filtered_structures, global_ref)
+
+    print("[INFO] Creating sidechain distance table...")
+    distance_table = create_msa_distance_table(
+        filtered_seq_alignments, filtered_structures, global_ref, distance_type="sidechain"
+    )
+
+    print("[INFO] Creating CA-only MSA table...")
+    ca_residue_table = create_msa_table(
+        filtered_seq_alignments, filtered_structures, global_ref, atom_type="CA"
+    )
+
+    print("[INFO] Creating CA-only distance table...")
+    ca_distance_table = create_msa_distance_table(
+        filtered_seq_alignments, filtered_structures, global_ref, distance_type="backbone"
+    )
+
+    # Check if all tables have the same columns
+    print(f"[DEBUG] Table column counts:")
+    print(f"  - residue_table: {len(residue_table.columns)}")
+    print(f"  - distance_table: {len(distance_table.columns)}")
+    print(f"  - ca_residue_table: {len(ca_residue_table.columns)}")
+    print(f"  - ca_distance_table: {len(ca_distance_table.columns)}")
+
+    # Check for differences between regular and CA tables
+    if len(residue_table.columns) != len(ca_residue_table.columns):
+        print(f"[WARNING] Column count mismatch between residue_table and ca_residue_table")
+
+        # Find which columns are different
+        reg_cols = set(residue_table.columns)
+        ca_cols = set(ca_residue_table.columns)
+
+        if len(reg_cols - ca_cols) > 0:
+            print(f"[DEBUG] Columns in residue_table but not in ca_residue_table: {sorted(list(reg_cols - ca_cols))}")
+
+        if len(ca_cols - reg_cols) > 0:
+            print(f"[DEBUG] Columns in ca_residue_table but not in residue_table: {sorted(list(ca_cols - reg_cols))}")
+
+        # Ensure CA tables have the same columns as regular tables for consistent GRN mapping
+        print(f"[INFO] Making CA tables consistent with regular tables")
+
+        # Create a consistent column set - use the regular table's columns as the standard
+        all_cols = residue_table.columns
+
+        # Reindex CA tables to match the regular tables
+        # This adds NaN for missing columns and removes extra columns
+        ca_residue_table = ca_residue_table.reindex(columns=all_cols)
+        ca_distance_table = ca_distance_table.reindex(columns=all_cols)
+
+        print(f"[INFO] CA tables reindexed to match regular tables")
+        print(f"  - ca_residue_table: {len(ca_residue_table.columns)} columns")
+        print(f"  - ca_distance_table: {len(ca_distance_table.columns)} columns")
+
+    # Create copies of the tables that will have GRN column names
+    residue_table_grn = residue_table.copy()
+    distance_table_grn = distance_table.copy()
+    ca_residue_table_grn = ca_residue_table.copy()
+    ca_distance_table_grn = ca_distance_table.copy()
+
+    print(f"[INFO] Reference structure: {global_ref}")
+
+    # Get the reference structure
+    ref_struct = filtered_structures[global_ref]
+    ref_df = ref_struct['df_ca_norm']
+
+    # VERY IMPORTANT: WE NEED TO SET THE TM RANGES FOR THE GLOBAL REFERENCE (SEE DEBUGING PRINT STATEMENT)
+    # Create column mapping using the predefined TM helix ranges
+    tm_ranges = [
+        [4, 27],   # Helix 1
+        [35, 54],  # Helix 2
+        [74, 93],  # Helix 3
+        [104, 123], # Helix 4
+        [129, 155], # Helix 5
+        [166, 188], # Helix 6
+        [198, 226], # Helix 7
+    ]
+
+    # Get the column to auth_seq_id mapping
+    column_to_auth_seq = residue_table.attrs.get('column_to_auth_seq', {})
+    if not column_to_auth_seq:
+        print("[ERROR] No column_to_auth_seq mapping found in residue_table")
+        return {}
+
+    # Create a reverse mapping from auth_seq_id to column
+    auth_seq_to_column = {seq_id: col for col, seq_id in column_to_auth_seq.items()}
+
+    # Step 1: Map columns in the GRN table to the corresponding helix
+    column_to_helix = {}
+    for helix_num, (start, end) in enumerate(tm_ranges, 1):
+        print(f"[INFO] Mapping Helix {helix_num}: Auth_seq_id range {start}-{end}")
+        for auth_seq_id in range(start, end + 1):
+            # Find the column that corresponds to this auth_seq_id
+            if auth_seq_id in auth_seq_to_column:
+                column = auth_seq_to_column[auth_seq_id]
+                column_to_helix[column] = helix_num
+
+    print(f"[INFO] Mapped {len(column_to_helix)} columns to helix numbers")
+
+    # Step 2: Calculate the closest overall position to retinal for each helix
+    helix_pivot_columns = {}
+
+    for helix_num in range(1, 8):
+        # Get all columns for this helix
+        helix_columns = [col for col, h_num in column_to_helix.items() if h_num == helix_num]
+        if not helix_columns:
+            print(f"[WARNING] No columns found for Helix {helix_num}")
+            continue
+
+        # Calculate mean distance to retinal for each position in this helix
+        min_distance = float('inf')
+        pivot_column = None
+
+        for column in helix_columns:
+            # Get distances to retinal for this position
+            distances = distance_table[column].dropna()
+            if len(distances) == 0:
+                continue
+
+            mean_distance = distances.mean()
+            if mean_distance < min_distance:
+                min_distance = mean_distance
+                pivot_column = column
+
+        if pivot_column is not None:
+            helix_pivot_columns[helix_num] = pivot_column
+            auth_seq_id = column_to_auth_seq.get(pivot_column)
+            print(f"[INFO] Helix {helix_num}: Found pivot at column {pivot_column} (auth_seq_id: {auth_seq_id}) with mean distance {min_distance:.2f}Å")
+        else:
+            print(f"[WARNING] Could not find pivot for Helix {helix_num}")
+
+    # Step 3 & 4: Rename columns to format <helix>.<position> with pivot as X.50
+    new_columns = []
+    column_mapping = {}
+
+    for column in residue_table.columns:
+        helix_num = column_to_helix.get(column)
+
+        if helix_num is not None and helix_num in helix_pivot_columns:
+            # This is a TM helix position
+            pivot_column = helix_pivot_columns[helix_num]
+            offset = list(residue_table.columns).index(column) - list(residue_table.columns).index(pivot_column)
+            position = 50 + offset
+            grn_label = f"{helix_num}.{position}"
+            column_mapping[column] = grn_label
+            new_columns.append(grn_label)
+        else:
+            # Handle non-TM positions
+            auth_seq_id = column_to_auth_seq.get(column)
+
+            # Determine region based on auth_seq_id
+            if auth_seq_id is not None:
+                # Check if it's before first helix
+                if auth_seq_id < tm_ranges[0][0]:
+                    distance = tm_ranges[0][0] - auth_seq_id
+                    grn_label = f"n.{distance}"
+                # Check if it's after last helix
+                elif auth_seq_id > tm_ranges[-1][1]:
+                    distance = auth_seq_id - tm_ranges[-1][1]
+                    grn_label = f"c.{distance}"
+                else:
+                    # It's in a loop region - find the closest helices
+                    for i in range(len(tm_ranges) - 1):
+                        prev_end = tm_ranges[i][1]
+                        next_start = tm_ranges[i+1][0]
+
+                        if prev_end < auth_seq_id < next_start:
+                            # It's in a loop between helix i+1 and i+2
+                            prev_helix = i + 1
+                            next_helix = i + 2
+
+                            # Determine which helix is closer
+                            dist_to_prev = auth_seq_id - prev_end
+                            dist_to_next = next_start - auth_seq_id
+
+                            if dist_to_prev <= dist_to_next:
+                                grn_label = f"{prev_helix}{next_helix}.{dist_to_prev:03d}"
+                            else:
+                                grn_label = f"{next_helix}{prev_helix}.{dist_to_next:03d}"
+                            break
+                    else:
+                        # Fallback for positions not identified as loops
+                        grn_label = f"X.{column}"
+            else:
+                # Columns without auth_seq_id mapping
+                grn_label = f"X.{column}"
+
+            column_mapping[column] = grn_label
+            new_columns.append(grn_label)
+
+    print(f"[INFO] Created new column names with GRN notation")
+
+    # Verify we have the right number of column names
+    if len(new_columns) != len(residue_table.columns):
+        print(f"[ERROR] Column count mismatch: Generated {len(new_columns)} names for {len(residue_table.columns)} columns")
+        # Fix the column count if needed
+        while len(new_columns) < len(residue_table.columns):
+            idx = len(new_columns)
+            new_columns.append(f"X.{idx}")
+            print(f"[WARNING] Added placeholder column name X.{idx}")
+        if len(new_columns) > len(residue_table.columns):
+            print(f"[WARNING] Trimming excess column names")
+            print(f"[DEBUG] New columns length: {len(new_columns)}, residue_table columns: {len(residue_table.columns)}")
+            print(f"[DEBUG] First few excess columns: {new_columns[len(residue_table.columns):len(residue_table.columns)+5]}")
+            new_columns = new_columns[:len(residue_table.columns)]
+
+    # Print column counts for debugging
+    print(f"[DEBUG] Column counts before renaming:")
+    print(f"  - residue_table_grn: {len(residue_table_grn.columns)}")
+    print(f"  - distance_table_grn: {len(distance_table_grn.columns)}")
+    print(f"  - ca_residue_table_grn: {len(ca_residue_table_grn.columns)}")
+    print(f"  - ca_distance_table_grn: {len(ca_distance_table_grn.columns)}")
+    print(f"  - new_columns: {len(new_columns)}")
+
+    # Apply the new column names
+    residue_table_grn.columns = new_columns
+    distance_table_grn.columns = new_columns
+
+    # Check if CA tables have the same column count
+    if len(ca_residue_table_grn.columns) != len(new_columns):
+        print(f"[ERROR] CA residue table has {len(ca_residue_table_grn.columns)} columns, but new_columns has {len(new_columns)}")
+        print(f"[ERROR] This mismatch is causing the error. Checking columns...")
+
+        # Check which columns might be different
+        if len(ca_residue_table_grn.columns) > len(new_columns):
+            print(f"[DEBUG] CA table has EXTRA columns. First extra column: {ca_residue_table_grn.columns[len(new_columns)]}")
+        else:
+            print(f"[DEBUG] CA table has FEWER columns than new_columns")
+
+        # For safety, create specific column names for CA tables matching their actual column count
+        ca_columns = new_columns.copy()
+        if len(ca_residue_table_grn.columns) > len(ca_columns):
+            # Need to add columns
+            for i in range(len(ca_columns), len(ca_residue_table_grn.columns)):
+                ca_columns.append(f"CA_extra_{i}")
+        elif len(ca_residue_table_grn.columns) < len(ca_columns):
+            # Need to trim columns
+            ca_columns = ca_columns[:len(ca_residue_table_grn.columns)]
+
+        # Apply specific column names to CA tables
+        ca_residue_table_grn.columns = ca_columns
+        ca_distance_table_grn.columns = ca_columns
+
+        print(f"[WARNING] CA tables and main tables now have different column names")
+    else:
+        # Normal case - all tables have the same number of columns
+        ca_residue_table_grn.columns = new_columns
+        ca_distance_table_grn.columns = new_columns
+
+    print(f"[DEBUG] New columns successfully applied: {len(new_columns)} columns total")
+
+    # Debug output to check GRN column names
+    print(f"[DEBUG] GRN mapping generated {len(column_mapping)} position mappings")
+
+    # Store the column mapping in the tables for reference
+    residue_table_grn.attrs['column_mapping'] = column_mapping
+    distance_table_grn.attrs['column_mapping'] = column_mapping
+    ca_residue_table_grn.attrs['column_mapping'] = column_mapping
+    ca_distance_table_grn.attrs['column_mapping'] = column_mapping
+
+    # Save the tables immediately after GRN column assignment
+    try:
+        print("[INFO] Saving MSA tables with GRN column names...")
+        output_dir = "opsin_output/opsin_grn_tables"
+        os.makedirs(output_dir, exist_ok=True)
+
+        # Save the tables with GRN column names
+        residue_table_grn.to_csv(f"{output_dir}/residue_table_grn.csv")
+        distance_table_grn.to_csv(f"{output_dir}/distance_table_grn.csv")
+        ca_residue_table_grn.to_csv(f"{output_dir}/ca_residue_table_grn.csv")
+        ca_distance_table_grn.to_csv(f"{output_dir}/ca_distance_table_grn.csv")
+
+        # Create a column mapping DataFrame
+        mapping_records = []
+        original_columns = list(residue_table.columns)
+
+        for i, (orig_col, grn_label) in enumerate(zip(original_columns, new_columns)):
+            auth_seq_id = column_to_auth_seq.get(orig_col, "unknown")
+            helix_num = column_to_helix.get(orig_col, "")
+
+            record = {
+                "Original_Column": orig_col,
+                "GRN_Label": grn_label,
+                "Auth_Seq_ID": auth_seq_id,
+                "Helix": helix_num if helix_num else "",
+                "Is_Pivot": "Yes" if orig_col in helix_pivot_columns.values() else "No"
+            }
+            mapping_records.append(record)
+
+        # Save the column mapping as CSV
+        mapping_df = pd.DataFrame(mapping_records)
+        mapping_df.to_csv(f"{output_dir}/column_mapping.csv", index=False)
+
+        # Save a CSV with both original and GRN column names for each table
+        for name, table, prefix in [
+            ("Residue Table", residue_table, "residue"),
+            ("Distance Table", distance_table, "distance"),
+            ("CA Residue Table", ca_residue_table, "ca_residue"),
+            ("CA Distance Table", ca_distance_table, "ca_distance")
+        ]:
+            # Create a copy with both original and GRN column names
+            dual_table = table.copy()
+
+            # Create new column names with both original and GRN
+            dual_columns = [f"{orig}|{grn}" for orig, grn in zip(original_columns, new_columns)]
+            dual_table.columns = dual_columns
+
+            # Save with dual column names
+            dual_table.to_csv(f"{output_dir}/{prefix}_table_dual.csv")
+
+        # Also save a pickle version with full metadata
+        import pickle
+        grn_tables = {
+            "residue_table": residue_table_grn,
+            "distance_table": distance_table_grn,
+            "ca_residue_table": ca_residue_table_grn,
+            "ca_distance_table": ca_distance_table_grn,
+            "column_mapping": column_mapping,
+            "column_to_auth_seq": column_to_auth_seq,
+            "column_to_helix": column_to_helix,
+            "helix_pivot_columns": helix_pivot_columns
+        }
+        with open(f"{output_dir}/grn_tables.pkl", "wb") as f:
+            pickle.dump(grn_tables, f)
+
+        print(f"[INFO] Tables saved to {output_dir}/")
+        print(f"[INFO] Column mapping saved to {output_dir}/column_mapping.csv")
+    except Exception as e:
+        print(f"[WARNING] Could not save GRN tables: {e}")
+    print(f"[DEBUG] Sample column names: {', '.join(str(col) for col in list(residue_table_grn.columns)[:10])}")
+
+    # Count columns by format
+    format_counts = {'helix_format': 0, 'n_terminal': 0, 'c_terminal': 0, 'loop': 0, 'unassigned': 0}
+    helix_count = {}
+
+    for col in residue_table_grn.columns:
+        col_str = str(col)
+
+        # Primary focus on N.YY format (dot notation for helices)
+        if '.' in col_str and len(col_str.split('.')) == 2:
+            prefix, suffix = col_str.split('.')
+            if prefix.isdigit() and int(prefix) >= 1 and int(prefix) <= 7:
+                # This is a TM helix position in N.YY format
+                format_counts['helix_format'] += 1
+                helix_count[prefix] = helix_count.get(prefix, 0) + 1
+            elif prefix == 'n':
+                format_counts['n_terminal'] += 1
+            elif prefix == 'c':
+                format_counts['c_terminal'] += 1
+            elif prefix == 'L' or (len(prefix) == 2 and prefix.isdigit()):
+                format_counts['loop'] += 1
+            elif prefix == 'X':
+                format_counts['unassigned'] += 1
+            else:
+                format_counts['unassigned'] += 1
+        else:
+            format_counts['unassigned'] += 1
+
+    print(f"[DEBUG] Column format counts: helix={format_counts['helix_format']}, n_terminal={format_counts['n_terminal']}, c_terminal={format_counts['c_terminal']}, loop={format_counts['loop']}, unassigned={format_counts['unassigned']}")
+    print(f"[DEBUG] TM helix positions: {sum(helix_count.values())}")
+    for helix, count in sorted(helix_count.items(), key=lambda x: int(x[0])):
+        print(f"[DEBUG] Helix {helix}: {count} positions")
+
+    # Count positions by helix for validation
+    pos_counts = count_residues_by_helix(residue_table_grn)
+    print(f"[INFO] TM residue positions: {pos_counts['tm_total']}")
+    for helix, count in sorted(pos_counts['helices'].items(), key=lambda x: int(x[0])):
+        print(f"[INFO] Helix {helix}: {count} positions")
+    print(f"[INFO] Other positions: N-terminal={pos_counts['other']['n']}, C-terminal={pos_counts['other']['c']}, Loop={pos_counts['other']['L']}, Unassigned={pos_counts['other']['X']}")
+
+    # Sort tables by GRN position
+    residue_table_grn = sort_grn_columns(residue_table_grn)
+    distance_table_grn = sort_grn_columns(distance_table_grn)
+    ca_residue_table_grn = sort_grn_columns(ca_residue_table_grn)
+    ca_distance_table_grn = sort_grn_columns(ca_distance_table_grn)
+
+    # Check if the helices were properly identified - if not, use direct assignment
+    pos_counts = count_residues_by_helix(residue_table_grn)
+    if pos_counts['tm_total'] == 0:
+        print("[WARNING] No TM helix positions detected in GRN mapping, using direct assignment")
+        # Create a tables dictionary
+        tables = {
+            "residue_table": residue_table_grn,
+            "distance_table": distance_table_grn,
+            "ca_residue_table": ca_residue_table_grn,
+            "ca_distance_table": ca_distance_table_grn
+        }
+
+        # Use direct assignment
+        tables = assign_helix_numbers_to_msa_tables(tables, filtered_structures, global_ref)
+
+        # Update our tables with the corrected ones
+        residue_table_grn = tables["residue_table"]
+        distance_table_grn = tables["distance_table"]
+        ca_residue_table_grn = tables["ca_residue_table"]
+        ca_distance_table_grn = tables["ca_distance_table"]
+
+        # Verify the helix positions now
+        pos_counts = count_residues_by_helix(residue_table_grn)
+        print(f"[INFO] After direct assignment - TM residue positions: {pos_counts['tm_total']}")
+        for helix, count in sorted(pos_counts['helices'].items(), key=lambda x: int(x[0])):
+            print(f"[INFO] Helix {helix}: {count} positions")
+
+    # Calculate helix distance statistics
+    print("[INFO] Calculating helix distance statistics...")
+    helix_stats = calculate_helix_distances(distance_table_grn)
+    ca_helix_stats = calculate_helix_distances(ca_distance_table_grn)
+
+    # Print the closest residue in each helix
+    print("[INFO] Closest residues to retinal in each helix:")
+    for helix in sorted(helix_stats.keys(), key=int):
+        if helix_stats[helix]['closest_position']:
+            print(f"[INFO] Helix {helix}: Position {helix_stats[helix]['closest_position']} (distance: {helix_stats[helix]['closest_mean']:.2f}Å)")
+
+    return {
+        "residue_table": residue_table_grn,
+        "distance_table": distance_table_grn,
+        "ca_residue_table": ca_residue_table_grn,
+        "ca_distance_table": ca_distance_table_grn,
+        "helix_stats": helix_stats,
+        "ca_helix_stats": ca_helix_stats,
+        "excluded_structures": excluded_structures if rmsd_df is not None else []
+    }
+
+
+def postprocess_grns():
+    # we must find and insert missing residues given the grn table based purely on alignments
+    # the key is to use the fixed numbering
+    # -> we check which residues are missing in terms of sequence number
+    # fill the canonical positions (tm_ranges), if necessary insert them and push the alignment 'out' from the .50 positions
+    # processing specific to helix => helix 1, 3, and 5 are alright
+    # helix 2: mind the gap
+    # helix 4: push residues from 4.51, 4.52 such that no gaps are present
+    # helix 6: less clear of an alignment
+    # helix 7: need to ensure we have the lysine at 7.50 -> others must be reviewed
+    pass

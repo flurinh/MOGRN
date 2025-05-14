@@ -365,3 +365,8 @@ def calculate_structure_errors(data_dict, output_dir='output', visualize=True):
         'binding_pocket_results': binding_pocket_results_hide,
         'binding_results_mo_exp': binding_results_mo_exp
     }
+
+
+def qdock():
+    return
+

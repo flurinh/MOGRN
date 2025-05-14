@@ -1276,7 +1276,8 @@ def load_opsin_structures(data_dir, output_dir='output', chain_id='A', visualize
     }
 
     return result
-# Import LYR processing utilities
+
+
 try:
     from lyr_processing import convert_lyr_to_lys_ret, process_lyr_in_structures, process_lyr_in_processor
     print("[INFO] Successfully imported LYR processing utilities")

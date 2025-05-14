@@ -304,7 +304,6 @@ def align_with_foldmason(data_dict, output_dir='output', tmp_dir='tmp_foldmason'
 
         # 5. Generate LDDT data (avoid HTML format)
         # Instead of using msa2lddtreport, use msa2lddt to get LDDT scores directly
-        from projects.opsin_analysis.foldmason_helpers import run_msa2lddt
 
         lddt_output = os.path.join(output_dir, "alignment_lddt_scores.txt")
         print("[INFO] Calculating LDDT scores...")
