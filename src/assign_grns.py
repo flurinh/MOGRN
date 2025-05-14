@@ -8,6 +8,14 @@ from src.reference_alignment import (
     create_seq_alignment_dicts_from_paths
 )
 
+from src.tree_based_alignment import (
+    align_and_assign_grn_tree_based,
+    build_similarity_tree,
+    create_guide_tree,
+    generate_transitive_alignment_paths,
+    create_tree_based_seq_alignment_dicts
+)
+
 from src.msa_grn import (
     analyze_residue_composition,
     generate_grn_msa_tables
@@ -27,7 +35,8 @@ def align_and_assign_grn(data_dict, output_dir='output', visualize=True):
     Step 6: Structure alignment and GRN assignment
 
     This function assigns Generic Residue Numbers (GRN) using cached alignment paths
-    without recalculating alignments.
+    without recalculating alignments, and also runs the tree-based alignment method
+    as an additional approach.
 
     Args:
         data_dict: Dictionary with data from previous steps
@@ -242,7 +251,12 @@ def align_and_assign_grn(data_dict, output_dir='output', visualize=True):
             except Exception as e:
                 print(f"Warning: Error during visualization: {e}")
 
-        return {
+        # Now run the tree-based alignment method as an additional approach
+        print("\n=== Running Tree-Based Alignment as Additional Method ===")
+        tree_based_results = run_tree_based_alignment(data_dict, output_dir, visualize)
+
+        # Combine results from both methods
+        result_dict = {
             'processed_structures': processed_structures_complete,
             'seq_alignment_dicts': seq_alignment_dicts,
             'msa_df': msa_df,
@@ -252,6 +266,19 @@ def align_and_assign_grn(data_dict, output_dir='output', visualize=True):
             'global_ref': global_ref,
             'type_reference_dict': type_reference_dict
         }
+        
+        # Add tree-based results with distinct keys
+        result_dict.update({
+            'tree_seq_alignment_dicts': tree_based_results.get('seq_alignment_dicts', {}),
+            'tree_msa_df': tree_based_results.get('msa_df', pd.DataFrame()),
+            'tree_distance_table': tree_based_results.get('distance_table', pd.DataFrame()),
+            'tree_ca_msa_df': tree_based_results.get('ca_msa_df', pd.DataFrame()),
+            'tree_ca_distance_table': tree_based_results.get('ca_distance_table', pd.DataFrame()),
+            'tree_central_ref': tree_based_results.get('central_ref', None),
+            'tree_enhanced_paths': tree_based_results.get('enhanced_paths', {})
+        })
+        
+        return result_dict
 
     except Exception as e:
         print(f"Error during GRN assignment: {e}")
@@ -267,4 +294,144 @@ def align_and_assign_grn(data_dict, output_dir='output', visualize=True):
             'ca_distance_table': pd.DataFrame(),
             'global_ref': global_ref if 'global_ref' in locals() else None,
             'type_reference_dict': type_reference_dict if 'type_reference_dict' in locals() else {}
+        }
+
+
+def run_tree_based_alignment(data_dict, output_dir='output', visualize=True, method='average'):
+    """
+    Run the tree-based alignment approach to generate alternative GRN assignments.
+    
+    This function uses hierarchical clustering to build a guide tree for progressive alignment,
+    which can handle structures that don't align well to a single reference.
+    
+    Args:
+        data_dict: Dictionary with data from previous steps
+        output_dir: Directory to save output files
+        visualize: Whether to generate visualizations
+        method: Linkage method for hierarchical clustering ('average', 'single', 'complete', etc.)
+        
+    Returns:
+        Dictionary with tree-based alignment results
+    """
+    print("\nRunning tree-based alignment for GRN assignment...")
+    
+    # Create a subdirectory for tree-based outputs
+    tree_output_dir = os.path.join(output_dir, 'tree_based')
+    os.makedirs(tree_output_dir, exist_ok=True)
+    print(f"Saving tree-based outputs to: {tree_output_dir}")
+    
+    processed_structures = data_dict.get('processed_structures', {})
+    alignment_paths = data_dict.get('alignment_paths', {})
+    rmsd_df = data_dict.get('rmsd_df', pd.DataFrame())
+    pdb_list = data_dict.get('pdb_list', [])
+    
+    # Generate tree-based alignment dictionaries
+    try:
+        # Create tree-based sequence alignment dictionaries
+        seq_alignment_dicts, central_ref, enhanced_paths = create_tree_based_seq_alignment_dicts(
+            rmsd_df.loc[pdb_list, pdb_list], 
+            alignment_paths, 
+            method=method
+        )
+        
+        print(f"Tree-based central reference structure: {central_ref}")
+        print(f"Generated {len(enhanced_paths) - len(alignment_paths)} additional transitive alignments")
+        
+        # Get structure mapping from data_dict if available
+        structure_mapping = data_dict.get('structure_mapping', {})
+        
+        # Generate GRN tables using the tree-based alignments
+        tables = generate_grn_msa_tables(
+            seq_alignment_dicts,
+            processed_structures,
+            central_ref,
+            rmsd_df=rmsd_df,
+            max_rmsd_threshold=3.0,
+            structure_mapping=structure_mapping
+        )
+        
+        # Extract tables
+        msa_df = tables["residue_table"]
+        distance_table = tables["distance_table"]
+        ca_msa_df = tables["ca_residue_table"]
+        ca_distance_table = tables["ca_distance_table"]
+        
+        # Report on any excluded structures
+        if "excluded_structures" in tables and tables["excluded_structures"]:
+            excluded_count = len(tables["excluded_structures"])
+            print(f"\n[INFO] {excluded_count} structures were excluded from tree-based MSA due to high RMSD (>3.0Å)")
+            print(f"[INFO] Final tree-based MSA includes {len(msa_df)} structures and {len(msa_df.columns)} positions")
+        
+        # Save the tree-based tables
+        msa_df.to_csv(os.path.join(tree_output_dir, "msa_table_grn_tree.csv"))
+        distance_table.to_csv(os.path.join(tree_output_dir, "distance_table_grn_tree.csv"))
+        ca_msa_df.to_csv(os.path.join(tree_output_dir, "ca_msa_table_grn_tree.csv"))
+        ca_distance_table.to_csv(os.path.join(tree_output_dir, "ca_distance_table_grn_tree.csv"))
+        
+        print("Tree-based MSA and distance tables generated and saved.")
+        
+        # Display statistics about the tables
+        print("\nTree-Based MSA Statistics:")
+        print(f"Number of structures: {len(msa_df)}")
+        print(f"Number of aligned positions: {len(msa_df.columns)}")
+        
+        # Count TM helices in GRN positions
+        tm_positions = [col for col in msa_df.columns if '.' in col and not col.startswith('L.')]
+        print(f"TM residue positions: {len(tm_positions)}")
+        
+        # Count positions by helix
+        for helix in range(1, 8):
+            helix_positions = [col for col in msa_df.columns if col.startswith(f"{helix}.")]
+            print(f"  Helix {helix}: {len(helix_positions)} positions")
+            
+        # Visualizations for tree-based approach
+        if visualize and not msa_df.empty:
+            try:
+                # Plot distance heatmap and line plots
+                if not distance_table.empty:
+                    fig1 = plot_average_distances_by_helix(distance_table)
+                    fig1.savefig(os.path.join(tree_output_dir, 'distances_by_helix_tree.png'), dpi=300, bbox_inches='tight')
+                    plt.close(fig1)
+                    
+                    fig2 = plot_distance_heatmap(distance_table)
+                    fig2.savefig(os.path.join(tree_output_dir, 'distance_heatmap_tree.png'), dpi=300, bbox_inches='tight')
+                    plt.close(fig2)
+                
+                # Create tree-based conservation and logo plots
+                fig = create_residue_conservation_plot(msa_df)
+                fig.savefig(os.path.join(tree_output_dir, "residue_conservation_tree.png"), dpi=300, bbox_inches='tight')
+                plt.close(fig)
+                
+                fig = plot_helix_logo_plots(msa_df)
+                fig.savefig(os.path.join(tree_output_dir, "helix_logo_plots_tree.png"), dpi=300, bbox_inches='tight')
+                plt.close(fig)
+                
+                print(f"Tree-based visualizations saved to {tree_output_dir}")
+                
+            except Exception as e:
+                print(f"Warning: Error during tree-based visualization: {e}")
+        
+        return {
+            'seq_alignment_dicts': seq_alignment_dicts,
+            'msa_df': msa_df,
+            'distance_table': distance_table,
+            'ca_msa_df': ca_msa_df,
+            'ca_distance_table': ca_distance_table,
+            'central_ref': central_ref,
+            'enhanced_paths': enhanced_paths
+        }
+        
+    except Exception as e:
+        print(f"Error during tree-based alignment: {e}")
+        import traceback
+        traceback.print_exc()
+        
+        return {
+            'seq_alignment_dicts': {},
+            'msa_df': pd.DataFrame(),
+            'distance_table': pd.DataFrame(),
+            'ca_msa_df': pd.DataFrame(),
+            'ca_distance_table': pd.DataFrame(),
+            'central_ref': None,
+            'enhanced_paths': {}
         }
