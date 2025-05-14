@@ -1,161 +1,243 @@
-"""
-Helper module for processing LYR residues (lysine-retinal Schiff base complexes)
-"""
+# lyr_processing.py
+
 import pandas as pd
-import numpy as np
-from typing import Dict, Any, Optional, Union, List
+import numpy as np # For NaN handling if needed
 
-def convert_lyr_to_lys_ret(df, retinal_name='RET'):
+# Define canonical atom names for the Lysine part when it's within an LYR residue
+# These are standard Lysine atom names.
+LYS_ATOM_NAMES_IN_LYR = {'N', 'CA', 'C', 'O', 'CB', 'CG', 'CD', 'CE', 'NZ'}
+# Any other atom found in an LYR entry will be assumed to be part of the Retinal moiety.
+
+def convert_single_lyr_entry(lyr_df: pd.DataFrame, retinal_res_name: str = 'RET') -> pd.DataFrame:
     """
-    Converts LYR residues (lysine-retinal Schiff base) to separate LYS and RET residues.
-    
+    Converts a DataFrame containing atoms of a single LYR residue instance
+    into two sets of atoms: one for LYS (ATOM group) and one for RET (HETATM group).
+
     Args:
-        df: DataFrame containing atom data with LYR residues
-        retinal_name: Name to use for retinal residues (default: 'RET')
-        
+        lyr_df (pd.DataFrame): DataFrame containing all atoms for one LYR residue instance.
+                               It's assumed all rows belong to the same original LYR residue
+                               (i.e., same pdb_id, auth_chain_id, auth_seq_id,
+                               potentially different res_atom_name or alt_id).
+        retinal_res_name (str): The res_name3l to assign to the retinal moiety.
+
     Returns:
-        DataFrame with LYR residues split into LYS and RET
+        pd.DataFrame: A DataFrame containing the separated LYS and RET atoms.
+                      Returns an empty DataFrame if input is empty or processing fails.
     """
-    # If no LYR residues, return original dataframe
-    if 'res_name3l' not in df.columns or not (df['res_name3l'] == 'LYR').any():
-        return df
-    
-    # Make a copy of the dataframe to avoid modifying the original
-    result_df = df.copy()
-    
-    # Find all LYR residues and get their unique residue IDs
-    lyr_mask = result_df['res_name3l'] == 'LYR'
-    lyr_data = result_df[lyr_mask].copy()
-    
-    # Process each LYR residue separately
-    if 'auth_seq_id' in lyr_data.columns:
-        lyr_residue_ids = lyr_data['auth_seq_id'].unique()
-        print(f"Found {len(lyr_residue_ids)} LYR residues to convert")
-        
-        all_lys_atoms = []
-        all_ret_atoms = []
-        
-        for lyr_id in lyr_residue_ids:
-            # Get atoms for this specific LYR residue
-            residue_mask = (lyr_data['auth_seq_id'] == lyr_id)
-            residue_atoms = lyr_data[residue_mask].copy()
-            
-            # Create LYS atoms (protein backbone and sidechain atoms)
-            lys_atoms = residue_atoms[residue_atoms['res_atom_name'].str.contains('N|CA|C|O|CB|CG|CD|CE|NZ')].copy()
-            lys_atoms['res_name3l'] = 'LYS'
-            # Keep group as ATOM
-            if 'group' in lys_atoms.columns:
-                lys_atoms['group'] = 'ATOM' 
-            
-            # Create RET atoms (retinal part - everything else)
-            ret_atoms = residue_atoms[~residue_atoms['res_atom_name'].str.contains('N|CA|C|O|CB|CG|CD|CE|NZ')].copy()
-            ret_atoms['res_name3l'] = retinal_name
-            # Set group to HETATM for retinal
-            if 'group' in ret_atoms.columns:
-                ret_atoms['group'] = 'HETATM'
-            
-            # Assign a new residue number for retinal
-            # Find maximum residue ID and add 1000 to ensure it doesn't conflict
-            if 'auth_seq_id' in result_df.columns:
-                max_resid = result_df['auth_seq_id'].astype(str).str.extract('(\d+)', expand=False).astype(float).max()
-                new_ret_id = int(max_resid + 1000) if not pd.isna(max_resid) else 1000
-                
-                # Assign the new residue ID to retinal atoms
-                ret_atoms['auth_seq_id'] = new_ret_id
-                if 'label_seq_id' in ret_atoms.columns:
-                    ret_atoms['label_seq_id'] = new_ret_id
-                
-                print(f"Converted LYR residue {lyr_id} to LYS + {retinal_name} (new ID: {new_ret_id})")
-            
-            all_lys_atoms.append(lys_atoms)
-            all_ret_atoms.append(ret_atoms)
-        
-        # Combine all converted residues
-        if all_lys_atoms and all_ret_atoms:
-            lys_atoms_combined = pd.concat(all_lys_atoms, ignore_index=True)
-            ret_atoms_combined = pd.concat(all_ret_atoms, ignore_index=True)
-            
-            # Remove original LYR residues from the result dataframe
-            result_df = result_df[~lyr_mask].copy()
-            
-            # Add the converted atoms back
-            result_df = pd.concat([result_df, lys_atoms_combined, ret_atoms_combined], ignore_index=True)
-            
-            print(f"Total: Converted {len(lyr_data)} LYR atoms to {len(lys_atoms_combined)} LYS + {len(ret_atoms_combined)} {retinal_name} atoms")
+    if lyr_df.empty:
+        return pd.DataFrame()
+
+    # Ensure 'res_atom_name' column exists
+    if 'res_atom_name' not in lyr_df.columns:
+        print("Warning: 'res_atom_name' column missing in LYR DataFrame. Cannot process.")
+        return lyr_df # Return as is, or an empty DF
+
+    lys_part_rows = []
+    ret_part_rows = []
+
+    # Preserve original columns, make copies for modification
+    # This ensures all original data (atom_id, coords, b_factor, alt_id, etc.) is kept
+    for _, atom_row_series in lyr_df.iterrows():
+        atom_row = atom_row_series.copy() # Make a mutable copy of the row
+
+        if atom_row['res_atom_name'] in LYS_ATOM_NAMES_IN_LYR:
+            atom_row['res_name3l'] = 'LYS'
+            atom_row['group'] = 'ATOM'  # Lysine is a standard amino acid part
+            lys_part_rows.append(atom_row)
+        else:
+            # Assume all other atoms are part of the retinal moiety
+            atom_row['res_name3l'] = retinal_res_name
+            atom_row['group'] = 'HETATM'  # Retinal is a HETATM
+            # The auth_seq_id for the RET part will remain the same as the original LYR.
+            # This implies the RET is associated with that specific LYS position.
+            # If a different auth_seq_id is desired for RET, it would need more complex logic
+            # (e.g., ensuring uniqueness across the entire PDB).
+            ret_part_rows.append(atom_row)
+
+    # Combine the processed parts
+    processed_parts = []
+    if lys_part_rows:
+        processed_parts.append(pd.DataFrame(lys_part_rows))
+    if ret_part_rows:
+        processed_parts.append(pd.DataFrame(ret_part_rows))
+
+    if not processed_parts:
+        print("Warning: LYR entry resulted in no atoms after splitting. Original LYR atoms:")
+        # print(lyr_df) # Uncomment for debugging
+        return pd.DataFrame() # Or return original lyr_df if preferred
+
+    return pd.concat(processed_parts, ignore_index=True)
+
+
+def process_lyr_in_dataframe(structure_df: pd.DataFrame, retinal_res_name: str = 'RET') -> pd.DataFrame:
+    """
+    Processes all LYR residues within a single structure's DataFrame.
+    Identifies LYR residues, converts them to LYS and RET components,
+    and reconstructs the DataFrame.
+
+    Args:
+        structure_df (pd.DataFrame): The DataFrame for a single PDB structure.
+        retinal_res_name (str): The name to assign to the retinal moiety (e.g., 'RET').
+
+    Returns:
+        pd.DataFrame: The modified DataFrame with LYR processed.
+    """
+    if 'res_name3l' not in structure_df.columns or not (structure_df['res_name3l'] == 'LYR').any():
+        return structure_df  # No LYR residues to process or column missing
+
+    # Separate LYR atoms from the rest of the structure
+    non_lyr_df = structure_df[structure_df['res_name3l'] != 'LYR'].copy()
+    all_lyr_atoms_df = structure_df[structure_df['res_name3l'] == 'LYR'].copy()
+
+    if all_lyr_atoms_df.empty:
+        return structure_df # Should be caught by .any() above, but defensive
+
+    processed_individual_lyr_dfs = []
+
+    # Define columns that uniquely identify a residue instance.
+    # This handles cases where multiple LYR residues might exist in one PDB,
+    # or where LYR has altlocs (all atoms of one LYR instance, including all its altlocs,
+    # will share these identifiers).
+    residue_instance_id_cols = ['auth_chain_id', 'auth_seq_id']
+
+    # Check for insertion code column (e.g., 'pdbx_PDB_ins_code' or 'ins_code')
+    # Use the one present in the DataFrame.
+    ins_code_col = None
+    if 'pdbx_PDB_ins_code' in all_lyr_atoms_df.columns:
+        ins_code_col = 'pdbx_PDB_ins_code'
+    elif 'ins_code' in all_lyr_atoms_df.columns:
+        ins_code_col = 'ins_code'
+
+    if ins_code_col:
+        # Only add if the column contains meaningful data (not all NaN/empty)
+        # Replace numpy.nan with a fill value for groupby if necessary, or ensure dropna=False
+        # For groupby, NaN is treated as a distinct group, which is usually fine.
+        if all_lyr_atoms_df[ins_code_col].notna().any() and \
+           (all_lyr_atoms_df[ins_code_col].astype(str).str.strip().replace('', 'nan') != 'nan').any():
+            residue_instance_id_cols.append(ins_code_col)
+
+    # Ensure all grouping columns actually exist
+    valid_group_cols = [col for col in residue_instance_id_cols if col in all_lyr_atoms_df.columns]
+    if 'auth_seq_id' not in valid_group_cols: # auth_seq_id is critical
+        print("Warning: 'auth_seq_id' missing from LYR data. Cannot group LYR instances. Skipping LYR processing.")
+        return structure_df
+
+    # Group by each unique LYR residue instance
+    for _, lyr_instance_df in all_lyr_atoms_df.groupby(valid_group_cols, dropna=False):
+        converted_df = convert_single_lyr_entry(lyr_instance_df, retinal_res_name=retinal_res_name)
+        if not converted_df.empty:
+            processed_individual_lyr_dfs.append(converted_df)
+
+    if not processed_individual_lyr_dfs: # No LYR residues were successfully converted
+        # This means all_lyr_atoms_df will be added back, effectively no change for LYRs
+        print("Warning: No LYR residues were successfully converted. Original LYR data will be kept.")
+        return pd.concat([non_lyr_df, all_lyr_atoms_df], ignore_index=True).sort_values(by='atom_id').reset_index(drop=True)
+
+    # Combine non-LYR parts with newly processed LYS/RET parts
+    final_df_parts = [non_lyr_df] + processed_individual_lyr_dfs
+    final_df = pd.concat(final_df_parts, ignore_index=True)
+
+    # It's good practice to re-sort the DataFrame, e.g., by atom_id,
+    # to maintain an order similar to original PDB files if desired.
+    if 'atom_id' in final_df.columns:
+        # Ensure atom_id is numeric for sorting, coercing errors
+        final_df['atom_id'] = pd.to_numeric(final_df['atom_id'], errors='coerce')
+        final_df = final_df.sort_values(by='atom_id').reset_index(drop=True)
+
+    return final_df
+
+
+def process_lyr_in_structures_dict(structures_dict: dict, retinal_res_name: str = 'RET') -> dict:
+    """
+    Processes LYR residues in all structures within the 'processed_structures' dictionary.
+    Modifies the 'df' (and 'df_norm' if present and different) in each structure's data.
+    """
+    print(f"\n--- Starting LYR processing for {len(structures_dict)} structures ---")
+    processed_global_dict = {} # Create a new dict to avoid modifying input dict during iteration issues
+
+    for pdb_id, structure_data_entry in structures_dict.items():
+        # Create a shallow copy of the structure_data_entry dictionary.
+        # DataFrames within it will be replaced, not modified in place initially.
+        current_struc_data_copy = structure_data_entry.copy()
+
+        if 'df' in current_struc_data_copy and isinstance(current_struc_data_copy['df'], pd.DataFrame):
+            original_df = current_struc_data_copy['df']
+            num_lyr_before = (original_df['res_name3l'] == 'LYR').sum()
+
+            if num_lyr_before > 0:
+                print(f"  Processing LYR in {pdb_id} (found {num_lyr_before} LYR atoms)...")
+                processed_df = process_lyr_in_dataframe(original_df, retinal_res_name=retinal_res_name)
+                current_struc_data_copy['df'] = processed_df
+
+                num_lyr_after = (processed_df['res_name3l'] == 'LYR').sum()
+                num_lys_added = (processed_df['res_name3l'] == 'LYS').sum() - (original_df['res_name3l'] == 'LYS').sum()
+                num_ret_added = (processed_df['res_name3l'] == retinal_res_name).sum() - (original_df['res_name3l'] == retinal_res_name).sum()
+
+                if num_lyr_after == 0:
+                    print(f"    Successfully processed LYR for {pdb_id}. LYS atoms added: {num_lys_added}, {retinal_res_name} atoms added: {num_ret_added}.")
+                else:
+                    print(f"    Warning: LYR atoms still present in {pdb_id} after processing: {num_lyr_after} atoms.")
+
+                if len(processed_df) != len(original_df):
+                    print(f"    Warning: Atom count changed for {pdb_id} during LYR processing. "
+                          f"Before: {len(original_df)}, After: {len(processed_df)}")
+
+            # Optionally, process 'df_norm' if it exists and is a distinct DataFrame
+            if 'df_norm' in current_struc_data_copy and \
+               isinstance(current_struc_data_copy['df_norm'], pd.DataFrame) and \
+               current_struc_data_copy['df_norm'] is not original_df: # Check it's not the same object as 'df'
+
+                original_df_norm = current_struc_data_copy['df_norm']
+                if (original_df_norm['res_name3l'] == 'LYR').any():
+                    print(f"  Processing LYR in df_norm for {pdb_id}...")
+                    current_struc_data_copy['df_norm'] = process_lyr_in_dataframe(original_df_norm, retinal_res_name=retinal_res_name)
+
+        processed_global_dict[pdb_id] = current_struc_data_copy
+
+    print("--- LYR processing finished ---")
+    return processed_global_dict
+
+
+def process_lyr_in_processor_data(processor, retinal_res_name: str = 'RET') -> None:
+    """
+    Processes LYR residues in a CifBaseProcessor's main `data` DataFrame (if it exists).
+    Modifies `processor.data` in place.
+    """
+    if hasattr(processor, 'data') and isinstance(processor.data, pd.DataFrame) and not processor.data.empty:
+        print(f"\n--- Starting LYR processing for processor: {getattr(processor, 'name', 'Unnamed Processor')} ---")
+        original_data_df = processor.data
+        num_lyr_before = (original_data_df['res_name3l'] == 'LYR').sum()
+
+        if num_lyr_before > 0:
+            print(f"  Found {num_lyr_before} LYR atoms in processor data. Processing...")
+
+            pdb_ids_in_processor = original_data_df['pdb_id'].unique()
+            processed_dfs_for_processor = []
+
+            for pdb_id in pdb_ids_in_processor:
+                df_single_pdb = original_data_df[original_data_df['pdb_id'] == pdb_id].copy()
+                if (df_single_pdb['res_name3l'] == 'LYR').any():
+                     print(f"    Processing LYR for {pdb_id} within processor...")
+                     processed_dfs_for_processor.append(
+                         process_lyr_in_dataframe(df_single_pdb, retinal_res_name=retinal_res_name))
+                else:
+                     processed_dfs_for_processor.append(df_single_pdb)
+
+            if processed_dfs_for_processor:
+                processor.data = pd.concat(processed_dfs_for_processor, ignore_index=True)
+                # Re-sort the entire processor.data if needed
+                if 'atom_id' in processor.data.columns and 'pdb_id' in processor.data.columns:
+                     processor.data['atom_id'] = pd.to_numeric(processor.data['atom_id'], errors='coerce')
+                     processor.data = processor.data.sort_values(by=['pdb_id', 'atom_id']).reset_index(drop=True)
+
+                num_lyr_after = (processor.data['res_name3l'] == 'LYR').sum()
+                if num_lyr_after == 0:
+                    print(f"  Successfully processed LYR for processor data.")
+                else:
+                    print(f"  Warning: LYR atoms still present in processor data after processing: {num_lyr_after} atoms.")
+            else: # Should not happen if there were LYRs
+                print(f"  No data resulted from LYR processing in processor.")
+
+        print(f"--- LYR processing for processor finished ---")
     else:
-        # Simpler approach if we don't have auth_seq_id
-        # Create LYS atoms (protein backbone and sidechain atoms)
-        lys_atoms = lyr_data[lyr_data['res_atom_name'].str.contains('N|CA|C|O|CB|CG|CD|CE|NZ')].copy()
-        lys_atoms['res_name3l'] = 'LYS'
-        if 'group' in lys_atoms.columns:
-            lys_atoms['group'] = 'ATOM'
-        
-        # Create RET atoms (retinal part - everything else)
-        ret_atoms = lyr_data[~lyr_data['res_atom_name'].str.contains('N|CA|C|O|CB|CG|CD|CE|NZ')].copy()
-        ret_atoms['res_name3l'] = retinal_name
-        if 'group' in ret_atoms.columns:
-            ret_atoms['group'] = 'HETATM'
-        
-        # Remove original LYR residues from the result dataframe
-        result_df = result_df[~lyr_mask].copy()
-        
-        # Add the converted atoms back
-        result_df = pd.concat([result_df, lys_atoms, ret_atoms], ignore_index=True)
-        
-        print(f"Converted {len(lyr_data)} LYR atoms to {len(lys_atoms)} LYS + {len(ret_atoms)} {retinal_name} atoms")
-    
-    return result_df
-
-def process_lyr_in_structures(structures_dict, retinal_name='RET'):
-    """
-    Process all structures in the dictionary to convert LYR residues to LYS+RET.
-    
-    Args:
-        structures_dict: Dictionary of structure data with DataFrames
-        retinal_name: Name to use for retinal residues (default: 'RET')
-        
-    Returns:
-        Dictionary with properly processed structure data
-    """
-    result = {}
-    
-    for pdb_id, data in structures_dict.items():
-        # Create a copy to avoid modifying original
-        result[pdb_id] = dict(data)
-        
-        # Process the main structure DataFrame
-        if 'df' in data and isinstance(data['df'], pd.DataFrame) and not data['df'].empty:
-            result[pdb_id]['df'] = convert_lyr_to_lys_ret(data['df'], retinal_name=retinal_name)
-        
-        # Process normalized DataFrames if present
-        if 'df_norm' in data and isinstance(data['df_norm'], pd.DataFrame) and not data['df_norm'].empty:
-            result[pdb_id]['df_norm'] = convert_lyr_to_lys_ret(data['df_norm'], retinal_name=retinal_name)
-        
-        if 'df_ca_norm' in data and isinstance(data['df_ca_norm'], pd.DataFrame) and not data['df_ca_norm'].empty:
-            # For CA-only dataframe, we just need to rename any LYR to LYS (no splitting needed)
-            df_ca = data['df_ca_norm'].copy()
-            if 'res_name3l' in df_ca.columns:
-                df_ca.loc[df_ca['res_name3l'] == 'LYR', 'res_name3l'] = 'LYS'
-            result[pdb_id]['df_ca_norm'] = df_ca
-            
-    return result
-
-def process_lyr_in_processor(processor, retinal_name='RET'):
-    """
-    Process LYR residues in a CifProcessor's data.
-    
-    Args:
-        processor: CifProcessor or CifBaseProcessor instance
-        retinal_name: Name to use for retinal residues (default: 'RET')
-        
-    Returns:
-        None (modifies processor.data in place)
-    """
-    if not hasattr(processor, 'data') or processor.data is None or processor.data.empty:
-        print("Warning: Processor has no data to process")
-        return
-    
-    # Convert LYR residues in the data DataFrame
-    processor.data = convert_lyr_to_lys_ret(processor.data, retinal_name=retinal_name)
-    
-    print(f"Processed LYR residues in {processor.name if hasattr(processor, 'name') else 'processor'}")
+        print(f"Processor {getattr(processor, 'name', 'Unnamed Processor')} has no data or data is not a DataFrame. Skipping LYR processing.")

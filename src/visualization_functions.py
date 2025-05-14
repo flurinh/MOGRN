@@ -13,7 +13,7 @@ from matplotlib.patches import Patch
 import os
 
 # Import our color scheme
-from opsin_color_scheme import (
+from src.opsin_color_scheme import (
     OPSIN_COLORS, RMSD_CMAP, RMSD_COMPACT_CMAP, DIVERGING_CMAP, RMSD_DISCRETE_CMAP, RMSD_BOUNDS,
     HELIX_COLORS, HELIX_COLORS_STR, HELIX_COLORS_LIST, get_group_colors)
 

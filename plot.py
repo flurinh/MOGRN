@@ -17,7 +17,7 @@ import json  # For summary saving
 
 # --- Import visualization functions ---
 try:
-    from visualization_functions import (
+    from src.visualization_functions import (
         create_opsin_overview_plot, create_rmsd_color_scale_figure,
         create_and_visualize_similarity_tree, visualize_rmsd_matrix_improved,
         plot_similarity_tree, plot_rmsd_heatmap,
@@ -31,7 +31,7 @@ except ImportError as e1:
     print(f"Error importing from visualization_functions: {e1}")
     print("Attempting to import from current directory as a fallback for development.")
     try:
-        from visualization_functions import (  # type: ignore
+        from src.visualization_functions import (  # type: ignore
             create_opsin_overview_plot, create_rmsd_color_scale_figure,
             create_and_visualize_similarity_tree, visualize_rmsd_matrix_improved,
             plot_similarity_tree, plot_rmsd_heatmap,
@@ -56,7 +56,7 @@ except ImportError as e1:
             return fig, None if fn_name == "create_and_visualize_similarity_tree" else fig  # Adjust for return tuple
 
 
-        import inspect  # For dummy function names
+        import inspect
 
         create_opsin_overview_plot = create_rmsd_color_scale_figure = _dummy_plot_func
         create_and_visualize_similarity_tree = _dummy_plot_func  # Note: this one returns a tuple
@@ -68,7 +68,7 @@ except ImportError as e1:
 
 # Import the color scheme tools
 try:
-    from opsin_color_scheme import get_group_colors, RMSD_COMPACT_CMAP  # Import specific items needed
+    from src.opsin_color_scheme import get_group_colors, RMSD_COMPACT_CMAP  # Import specific items needed
 
     COLOR_SCHEME_LOADED = True
 except ImportError:

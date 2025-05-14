@@ -14,9 +14,9 @@ import pickle
 import hashlib
 
 # Import error_analysis module from the local package
-from common_utils import compute_retinal_mean_closest_distance
+from src.common_utils import compute_retinal_mean_closest_distance
 
-from visualization_functions import create_and_visualize_similarity_tree, visualize_rmsd_heatmap
+from src.visualization_functions import create_and_visualize_similarity_tree, visualize_rmsd_heatmap
 
 import matplotlib.pyplot as plt
 

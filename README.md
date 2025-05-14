@@ -23,6 +23,66 @@ cd MOGRN
 pip install -r requirements.txt
 ```
 
+### Installing Protos Framework (Required)
+
+MOGRN depends on the Protos framework for protein structure analysis. To install it:
+
+```bash
+# Clone the Protos repository
+git clone https://github.com/flurinh/protos.git
+cd protos
+
+# Install Protos in development mode
+pip install -e .
+
+# Return to the MOGRN directory
+cd ..
+```
+
+## Required Data Folders (Not Included)
+
+**IMPORTANT**: The repository does not include data files. You must create and populate these folders:
+
+1. **`property/`** - Contains property data for microbial opsins:
+   - `mo_exp.csv`: Main experimental data properties
+   - `helices.json`: Helix definitions
+   - Other supporting files
+
+2. **`structures/`** - Contains structure files organized in subdirectories:
+   - `hideaki_exp/`: Experimental structures from Hideaki dataset (CIF format)
+   - `hideaki_pred/`: Predicted structures from Hideaki dataset (CIF format)
+   - `mo_pred/`: Predicted microbial opsin structures (CIF format)
+
+Directory structure example:
+```
+MOGRN/
+├── property/
+│   ├── mo_exp.csv
+│   ├── helices.json
+│   └── ...
+├── structures/
+│   ├── hideaki_exp/
+│   │   └── [structure files (.cif)]
+│   ├── hideaki_pred/
+│   │   └── [structure files (.cif)]
+│   └── mo_pred/
+│       └── [structure files (.cif)]
+└── ...
+```
+
+## Project Structure
+
+The project is organized as follows:
+- **Main workflow scripts** are in the root directory:
+  - `prepare_data_fixed.py`: Data preparation and initialization
+  - `prepare_yaml.py`: Configuration generation for sequences
+  - `opsin_analysis_workflow.py`: Main analysis pipeline
+  - `plot.py`: Visualization generation
+- **Helper modules** are in the `src/` directory:
+  - Processing utilities
+  - Analysis tools
+  - Visualization functions
+
 ## Workflow Steps
 
 ### Step 1: Prepare Data Infrastructure and Initialize Datasets
@@ -117,6 +177,15 @@ python opsin_analysis_workflow.py --no-cache
 # Generate visualizations with specific input and output directories
 python plot.py --input-dir custom_output --output-dir custom_figures
 ```
+
+## Dependencies
+
+This project depends on several key packages:
+- **Protos**: Framework for protein structure analysis (https://github.com/flurinh/protos.git)
+- **BioPython**: For sequence and structure manipulation
+- **NumPy/Pandas**: For data analysis and manipulation
+- **Matplotlib/Seaborn**: For visualization
+- **FoldMason**: For structure alignment (included in Protos)
 
 ## Detailed Documentation
 

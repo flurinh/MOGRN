@@ -4,7 +4,7 @@ This guide explains how to run the microbial opsin analysis workflow and what ea
 
 ## Project Overview
 
-The Opsin Analysis project provides a comprehensive framework for analyzing, comparing, and visualizing experimental and predicted opsin structures using Generic Residue Numbering (GRN). The project focuses on the structural analysis of microbial opsins, which are light-sensitive proteins involved in various sensing functions.
+The MOGRN (Microbial Opsin Generic Residue Numbering) project provides a comprehensive framework for analyzing, comparing, and visualizing experimental and predicted opsin structures using Generic Residue Numbering (GRN). The project focuses on the structural analysis of microbial opsins, which are light-sensitive proteins involved in various sensing functions.
 
 The analysis pipeline integrates multiple components:
 - Structure data loading and preprocessing from various sources
@@ -14,10 +14,48 @@ The analysis pipeline integrates multiple components:
 - Generic Residue Number assignment for standardized comparison
 - Comprehensive visualization tools for structural insights
 
-## Module Architecture
+## Prerequisites
 
-The workflow is divided into specialized modules:
+### Installing Protos Framework
 
+MOGRN depends on the Protos framework for protein structure analysis. To install it:
+
+```bash
+# Clone the Protos repository
+git clone https://github.com/flurinh/protos.git
+cd protos
+
+# Install Protos in development mode
+pip install -e .
+
+# Return to the MOGRN directory
+cd ..
+```
+
+### Required Data Folders
+
+Before running the analysis pipeline, you must set up these data folders:
+
+1. **`property/`** folder containing:
+   - `mo_exp.csv`: Main experimental data properties
+   - `helices.json`: Helix definitions for transmembrane regions
+
+2. **`structures/`** folder with three subdirectories:
+   - `hideaki_exp/`: Experimental structures from Hideaki dataset (CIF format)
+   - `hideaki_pred/`: Predicted structures from Hideaki dataset (CIF format)
+   - `mo_pred/`: Predicted microbial opsin structures (CIF format)
+
+## Project Structure
+
+The workflow is organized into main scripts in the root directory and helper modules in the src/ directory:
+
+### Main Scripts
+- **prepare_data_fixed.py**: Initializes datasets and infrastructure
+- **prepare_yaml.py**: Generates configuration files for protein sequences
+- **opsin_analysis_workflow.py**: Orchestrates the complete analysis pipeline
+- **plot.py**: Creates visualizations from analysis results
+
+### Helper Modules (in src/)
 - **data_processing.py**: Loads, filters, and preprocesses opsin structures
 - **structure_comparison.py**: Compares and aligns structures, calculates RMSD
 - **helix_analysis.py**: Identifies and annotates transmembrane helices
@@ -25,7 +63,6 @@ The workflow is divided into specialized modules:
 - **msa_grn.py**: Handles multiple sequence alignment and GRN assignment
 - **visualization_functions.py**: Creates visualizations of alignments and analysis results
 - **foldmason_helpers.py**: Interfaces with FoldMason structure alignment tools
-- **opsin_analysis_workflow.py**: Orchestrates the complete analysis pipeline
 
 ## Step 1: Prepare Data Infrastructure and Initialize Datasets
 
@@ -100,7 +137,7 @@ The workflow follows these key processing steps:
 **Command to run:**
 ```bash
 # Create standardized visualizations and plots
-python plot_figures.py
+python plot.py
 ```
 
 **What this step does:**
@@ -126,15 +163,19 @@ The visualizations include:
 - Binding pocket comparisons
 - Statistical summaries of structural features
 
-## Output Files
+## Output Files and Directories
 
-The analysis produces several key output files:
+The analysis produces several output directories and key files:
 
-- **`rmsd_matrix.csv`**: Pairwise RMSD values between all structures
-- **`msa_table_grn.csv`**: Multiple sequence alignment with GRN positions
-- **`ca_distance_table_grn.csv`**: C-alpha distances from each residue to retinal
-- **`distance_table_grn.csv`**: Sidechain distances to retinal with GRN positions
-- **`protein_summary.csv`**: Summary of analyzed proteins with key metrics
+- **opsin_plots_output/**: Main output directory containing:
+  - **figures/**: Directory containing all generated visualization plots
+  - **summaries/**: Directory containing summary CSV files
+- **opsin_grn_tables/**: Directory containing GRN-related output files:
+  - **rmsd_matrix.csv**: Pairwise RMSD values between all structures
+  - **msa_table_grn.csv**: Multiple sequence alignment with GRN positions
+  - **ca_distance_table_grn.csv**: C-alpha distances from each residue to retinal
+  - **distance_table_grn.csv**: Sidechain distances to retinal with GRN positions
+  - **protein_summary.csv**: Summary of analyzed proteins with key metrics
 
 ## Optional Advanced Usage
 
@@ -146,7 +187,7 @@ If you need to customize the workflow beyond the default settings, the scripts s
 python opsin_analysis_workflow.py --output-dir custom_output
 
 # Specify input and output directories for visualizations
-python plot_figures.py --input-dir custom_output --output-dir custom_figures
+python plot.py --input-dir custom_output --output-dir custom_figures
 ```
 
 ### Caching Control
@@ -161,7 +202,7 @@ python opsin_analysis_workflow.py --no-cache
 python opsin_analysis_workflow.py --no-visualize
 
 # Generate higher quality figures (takes longer)
-python plot_figures.py --quality high
+python plot.py --quality high
 ```
 
 These advanced options should only be used when you need to override the default behavior.

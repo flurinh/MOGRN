@@ -9,7 +9,7 @@ import numpy as np
 import json
 from pathlib import Path
 
-from data_processing import  ensure_structure_dtypes
+from src.data_processing import  ensure_structure_dtypes
 
 
 def define_reference_helices(reference_structure, helix_ref_file=None):
@@ -343,7 +343,7 @@ def align_to_reference_and_annotate_helices(data_dict, output_dir='output', visu
         }
 
     # Define paths for helix files
-    property_dir = os.path.join(os.path.dirname(__file__), 'property')
+    property_dir = 'property'
     helix_ref_file = os.path.join(property_dir, 'helix_ref_CnChR2_J230_refine9.json')
     helix_cache_file = os.path.join(property_dir, 'helices.json')
 

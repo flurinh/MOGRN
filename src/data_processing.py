@@ -18,6 +18,13 @@ from tqdm import tqdm
 from protos.io.paths.path_config import ProtosPaths
 
 
+try:
+    from src.lyr_processing import process_lyr_in_processor_data
+    print("[INFO] Successfully imported LYR processing utilities")
+except ImportError:
+    print("[WARNING] Could not import LYR processing utilities. LYR residues will not be processed correctly.")
+
+
 def load_experimental_dataset(dataset_name='mo_exp'):
     """
     Load a dataset using CifProcessor
@@ -70,7 +77,7 @@ def filter_structures_by_chain_and_retinal(processor, chain='A', retinal_name='R
         Dictionary of filtered dataframes by PDB ID, with only chain A and one retinal
         Also updates the processor's data with the filtered structures.
     """
-    from error_analysis import find_retinal_within_cutoff
+    from src.error_analysis import find_retinal_within_cutoff
     
     filtered_structures = {}
     filtered_dfs = []
@@ -572,11 +579,11 @@ def load_opsin_structures(data_dir, output_dir='output', chain_id='A', visualize
     # Ensure paths are Path objects
     data_dir = Path(data_dir)
     output_dir = Path(output_dir)
-    
+
     # Set environment variables to force ProtosPaths to use the data_dir for PROTOS data
     os.environ["PROTOS_DATA_ROOT"] = str(data_dir.absolute())
     os.environ["PROTOS_REF_DATA_ROOT"] = str(data_dir.absolute())  # Force reference data to match user data
-    
+
     print(f"Using PROTOS data directory: {data_dir}")
     print(f"Using analysis output directory: {output_dir}")
 
@@ -627,7 +634,7 @@ def load_opsin_structures(data_dir, output_dir='output', chain_id='A', visualize
             ref_data_root=str(data_dir.absolute()),  # Force reference data to be the same as user data
             create_dirs=True
         )
-        
+
         print(f"Path resolver user_data_root: {paths.user_data_root}")
         print(f"Path resolver ref_data_root: {paths.ref_data_root}")
 
@@ -655,7 +662,7 @@ def load_opsin_structures(data_dir, output_dir='output', chain_id='A', visualize
             data_root=str(data_dir.absolute()),
             processor_data_dir="structure"
         )
-        
+
         # Override key paths to ensure consistency
         for processor in [cp_mo_exp, cp_hide_exp, cp_mo_pred, cp_hide_pred]:
             processor.path_structure_dir = os.path.join(str(data_dir.absolute()), "structure", "mmcif")
@@ -808,7 +815,7 @@ def load_opsin_structures(data_dir, output_dir='output', chain_id='A', visualize
                                     'type': 'json'
                                 })
                                 print(f"  Added {dataset_name} to registry manually")
-                                
+
                                 # Save the updated registry
                                 registry_path = structure_dir / "registry.json"
                                 try:
@@ -909,6 +916,9 @@ def load_opsin_structures(data_dir, output_dir='output', chain_id='A', visualize
             else:
                 print(f"WARNING: Cached {name} processor has no structures")
 
+    # Fix LYR
+    process_lyr_in_processor_data(cp_mo_exp, retinal_res_name='RET')
+
     # Filter structures by chain and retinal
     filtered_structures = {}
 
@@ -924,6 +934,8 @@ def load_opsin_structures(data_dir, output_dir='output', chain_id='A', visualize
         filtered_structures[dataset_name] = filter_structures_by_chain_and_retinal(processor, chain=chain_id,
                                                                                    retinal_name='RET',
                                                                                    cutoff=retinal_cutoff)
+
+
 
     # If we loaded from scratch (not from cache), save the processors to cache
     if raw_data is None and cache_raw:
@@ -1121,7 +1133,11 @@ def load_opsin_structures(data_dir, output_dir='output', chain_id='A', visualize
     # Filter ligands other than RET
     for pdb_id, data in processed_structures_complete.items():
         df = data['df']
-        filtered_df = df[~((df['group'] == 'HETATM') & (df['res_name3l'] != 'RET'))]
+        is_atom_record = (df['group'] != 'HETATM')
+        is_ret_hetatm = (df['group'] == 'HETATM') & (df['res_name3l'] == 'RET')
+        is_lyr_hetatm = (df['group'] == 'HETATM') & (df['res_name3l'] == 'LYR')
+        keep_condition = is_atom_record | is_ret_hetatm | is_lyr_hetatm
+        filtered_df = df[keep_condition]
         processed_structures_complete[pdb_id]['df'] = filtered_df
 
     # Set up df_norm and df_ca_norm with proper type conversion
@@ -1276,56 +1292,3 @@ def load_opsin_structures(data_dir, output_dir='output', chain_id='A', visualize
     }
 
     return result
-
-
-try:
-    from lyr_processing import convert_lyr_to_lys_ret, process_lyr_in_structures, process_lyr_in_processor
-    print("[INFO] Successfully imported LYR processing utilities")
-except ImportError:
-    print("[WARNING] Could not import LYR processing utilities. LYR residues will not be processed correctly.")
-
-
-def process_lyr_in_loaded_structures(result_dict, retinal_name='RET'):
-    """
-    Process LYR residues in structures that have already been loaded.
-    This is an additional post-processing step that can be applied after load_opsin_structures.
-    
-    Args:
-        result_dict: Dictionary returned by load_opsin_structures
-        retinal_name: Name to use for retinal residues (default: 'RET')
-        
-    Returns:
-        Updated result dictionary with LYR residues processed
-    """
-    try:
-        from lyr_processing import process_lyr_in_structures, process_lyr_in_processor
-        
-        print("\n=== Processing LYR residues (Lysine-Retinal Schiff Base) ===")
-        
-        # Process structures in the result dictionary
-        if 'processed_structures' in result_dict:
-            result_dict['processed_structures'] = process_lyr_in_structures(
-                result_dict['processed_structures'], 
-                retinal_name=retinal_name
-            )
-            print(f"Processed LYR residues in {len(result_dict['processed_structures'])} structures")
-        
-        # Process processors in the result dictionary
-        for processor_key in ['cp_mo_exp', 'cp_mo_pred', 'cp_hide_exp', 'cp_hide_pred']:
-            if processor_key in result_dict and result_dict[processor_key] is not None:
-                processor = result_dict[processor_key]
-                if hasattr(processor, 'data') and processor.data is not None and not processor.data.empty:
-                    print(f"Processing LYR residues in {processor_key}")
-                    process_lyr_in_processor(processor, retinal_name=retinal_name)
-        
-        return result_dict
-    except ImportError:
-        print("[WARNING] Could not import LYR processing utilities. LYR residues will not be processed.")
-        return result_dict
-    except Exception as e:
-        print(f"[WARNING] Error processing LYR residues: {e}")
-        import traceback
-        traceback.print_exc()
-        return result_dict
-
-# Add this to the end of load_opsin_structures function by modifying the source as needed

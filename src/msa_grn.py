@@ -8,7 +8,7 @@ import pandas as pd
 import re
 import os
 import matplotlib.pyplot as plt
-from visualization_functions import visualize_msa_distances
+from src.visualization_functions import visualize_msa_distances
 
 def create_msa_table(seq_alignment_dicts, processed_structures_complete, global_ref, atom_type="all"):
     """
@@ -1052,6 +1052,19 @@ def generate_grn_msa_tables(seq_alignment_dicts, processed_structures_complete, 
 
     # VERY IMPORTANT: WE NEED TO SET THE TM RANGES FOR THE GLOBAL REFERENCE (SEE DEBUGING PRINT STATEMENT)
     # Create column mapping using the predefined TM helix ranges
+
+    # tm_ranges of CnChR2_J230_refine9
+    tm_ranges = [
+        [88, 111],
+        [120, 140],
+        [157, 176],
+        [188, 209],
+        [212, 232],
+        [250, 273],
+        [285, 304]
+    ]
+    """
+    # tm ranges of mermaid
     tm_ranges = [
         [4, 27],   # Helix 1
         [35, 54],  # Helix 2
@@ -1061,6 +1074,7 @@ def generate_grn_msa_tables(seq_alignment_dicts, processed_structures_complete, 
         [166, 188], # Helix 6
         [198, 226], # Helix 7
     ]
+    """
 
     # Get the column to auth_seq_id mapping
     column_to_auth_seq = residue_table.attrs.get('column_to_auth_seq', {})
@@ -1414,9 +1428,5 @@ def postprocess_grns():
     # the key is to use the fixed numbering
     # -> we check which residues are missing in terms of sequence number
     # fill the canonical positions (tm_ranges), if necessary insert them and push the alignment 'out' from the .50 positions
-    # processing specific to helix => helix 1, 3, and 5 are alright
-    # helix 2: mind the gap
-    # helix 4: push residues from 4.51, 4.52 such that no gaps are present
-    # helix 6: less clear of an alignment
     # helix 7: need to ensure we have the lysine at 7.50 -> others must be reviewed
     pass

@@ -2,18 +2,18 @@ import pandas as pd
 import os
 import matplotlib.pyplot as plt
 
-from reference_alignment import (
+from src.reference_alignment import (
     find_type_references,
     find_global_reference,
     create_seq_alignment_dicts_from_paths
 )
 
-from msa_grn import (
+from src.msa_grn import (
     analyze_residue_composition,
     generate_grn_msa_tables
 )
 
-from visualization_functions import (
+from src.visualization_functions import (
     plot_average_distances_by_helix,
     plot_distance_heatmap,
     print_residue_composition,
@@ -103,6 +103,10 @@ def align_and_assign_grn(data_dict, output_dir='output', visualize=True):
     print(type_reference_dict)
 
     global_ref = find_global_reference(rmsd_df.loc[pdb_list, pdb_list], type_reference_dict)
+
+    # extremely important, the reference we use is hardcoded here!!!!
+    global_ref = 'CnChR2_J230_refine9'
+
     print(f"Global reference structure: {global_ref}")
 
     # Use cached alignment paths instead of recalculating alignments

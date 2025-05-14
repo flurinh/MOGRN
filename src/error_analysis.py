@@ -12,12 +12,12 @@ import os
 
 
 # Import shared utility functions from common_utils
-from common_utils import (
+from src.common_utils import (
     compute_retinal_mean_closest_distance,
     find_retinal_within_cutoff
 )
 
-from structure_comparison import calculate_binding_pocket_rmsd_for_pairs
+from src.structure_comparison import calculate_binding_pocket_rmsd_for_pairs
 
 
 def calculate_atom_level_errors(exp_coords, pred_coords, atom_names):
