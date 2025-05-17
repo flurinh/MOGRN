@@ -31,44 +31,7 @@ except ImportError:
         """Calculate minimum distances between atoms in coords1 and coords2."""
         distances = cdist(coords1, coords2)
         return np.min(distances, axis=1)
-        
-# Define a fallback alignment function that doesn't use CEalign (which can cause segmentation faults)
-def fallback_alignment(coords1, coords2):
-    """
-    A simple fallback alignment method that doesn't rely on CEalign.
-    Uses QCPSuperimposer directly with no path finding, just direct superposition.
-    
-    Args:
-        coords1: Numpy array of coordinates for the first structure (shape: n x 3)
-        coords2: Numpy array of coordinates for the second structure (shape: m x 3)
-        
-    Returns:
-        rotation matrix, translation vector, None (no path), RMSD
-    """
-    # Ensure we have numpy arrays
-    coords1 = np.array(coords1)
-    coords2 = np.array(coords2)
-    
-    # Get minimum number of points (we can only align as many points as are in the smaller set)
-    min_points = min(len(coords1), len(coords2))
-    
-    # If structures have different numbers of points, use the first min_points from each
-    if min_points < len(coords1):
-        coords1 = coords1[:min_points]
-    if min_points < len(coords2):
-        coords2 = coords2[:min_points]
-    
-    # Create QCP superimposer instance
-    qcp = QCPSuperimposer()
-    
-    # Set the coordinates
-    qcp.set(coords1, coords2)
-    
-    # Perform the superposition
-    qcp.run()
-    
-    # Return the result
-    return qcp.rot, qcp.tran, None, qcp.rms
+
 
 def compute_all_vs_all_rmsd_improved(structures, align_to=None, subset='CA', chain_id='A', tm_score_threshold=0.0, 
                               speed=9, verbose=False, use_helix_only=True, cache_dir=None, force_recompute=False):
@@ -99,7 +62,6 @@ def compute_all_vs_all_rmsd_improved(structures, align_to=None, subset='CA', cha
     
     # Prepare the list of structures
     structure_ids = list(structures.keys())
-    n_structures = len(structure_ids)
     
     # Generate a unique cache key based on input parameters
     cache_key = f"{subset}_{chain_id}_{tm_score_threshold}_{speed}_{use_helix_only}_{sorted(structure_ids)}"
@@ -203,12 +165,8 @@ def compute_all_vs_all_rmsd_improved(structures, align_to=None, subset='CA', cha
                                 print(f"[WARNING] No TM helix residues (1-7) found for {struct1_id} or {struct2_id}. Using all protein residues instead.")
 
                     # Filter for the specified atom subset
-                    if subset == 'CA':
-                        struct1_df = struct1_df[struct1_df['res_atom_name'] == 'CA']
-                        struct2_df = struct2_df[struct2_df['res_atom_name'] == 'CA']
-                    elif subset == 'backbone':
-                        struct1_df = struct1_df[struct1_df['res_atom_name'].isin(['CA', 'C', 'N', 'O'])]
-                        struct2_df = struct2_df[struct2_df['res_atom_name'].isin(['CA', 'C', 'N', 'O'])]
+                    struct1_df = struct1_df[struct1_df['res_atom_name'] == 'CA']
+                    struct2_df = struct2_df[struct2_df['res_atom_name'] == 'CA']
 
                     # Extract coordinates
                     struct1_coords = struct1_df[['x', 'y', 'z']].astype(float).values
