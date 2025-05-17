@@ -120,7 +120,7 @@ def compute_all_vs_all_rmsd_improved(structures, align_to=None, subset='CA', cha
 
     for i, struct1_id in enumerate(structure_ids):
         for j, struct2_id in enumerate(structure_ids):
-            if (struct1_id != '2L6X') and (struct2_id != '2L6X'):
+            if (struct1_id != '2L6X') and (struct2_id != '2L6X'):  # this was a falsly included nmr structure
                 if i == j:
                     rmsd_matrix[i, j] = 0.0
                     continue
@@ -270,11 +270,6 @@ def compute_all_vs_all_rmsd_improved(structures, align_to=None, subset='CA', cha
     
     # Return the DataFrame, matrix, structure IDs, and alignment paths
     return rmsd_df, rmsd_matrix, structure_ids, alignment_paths
-
-
-import numpy as np
-import pandas as pd
-from tqdm import tqdm
 
 
 # Assume get_structure_alignment (which uses CEalign),

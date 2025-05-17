@@ -42,16 +42,13 @@ def convert_single_lyr_entry(lyr_df: pd.DataFrame, retinal_res_name: str = 'RET'
 
         if atom_row['res_atom_name'] in LYS_ATOM_NAMES_IN_LYR:
             atom_row['res_name3l'] = 'LYS'
-            atom_row['group'] = 'ATOM'  # Lysine is a standard amino acid part
+            atom_row['res_name1l'] = 'K'
+            atom_row['group'] = 'ATOM'
             lys_part_rows.append(atom_row)
         else:
             # Assume all other atoms are part of the retinal moiety
             atom_row['res_name3l'] = retinal_res_name
             atom_row['group'] = 'HETATM'  # Retinal is a HETATM
-            # The auth_seq_id for the RET part will remain the same as the original LYR.
-            # This implies the RET is associated with that specific LYS position.
-            # If a different auth_seq_id is desired for RET, it would need more complex logic
-            # (e.g., ensuring uniqueness across the entire PDB).
             ret_part_rows.append(atom_row)
 
     # Combine the processed parts
@@ -63,7 +60,6 @@ def convert_single_lyr_entry(lyr_df: pd.DataFrame, retinal_res_name: str = 'RET'
 
     if not processed_parts:
         print("Warning: LYR entry resulted in no atoms after splitting. Original LYR atoms:")
-        # print(lyr_df) # Uncomment for debugging
         return pd.DataFrame() # Or return original lyr_df if preferred
 
     return pd.concat(processed_parts, ignore_index=True)
@@ -93,11 +89,6 @@ def process_lyr_in_dataframe(structure_df: pd.DataFrame, retinal_res_name: str =
         return structure_df # Should be caught by .any() above, but defensive
 
     processed_individual_lyr_dfs = []
-
-    # Define columns that uniquely identify a residue instance.
-    # This handles cases where multiple LYR residues might exist in one PDB,
-    # or where LYR has altlocs (all atoms of one LYR instance, including all its altlocs,
-    # will share these identifiers).
     residue_instance_id_cols = ['auth_chain_id', 'auth_seq_id']
 
     # Check for insertion code column (e.g., 'pdbx_PDB_ins_code' or 'ins_code')
@@ -109,9 +100,6 @@ def process_lyr_in_dataframe(structure_df: pd.DataFrame, retinal_res_name: str =
         ins_code_col = 'ins_code'
 
     if ins_code_col:
-        # Only add if the column contains meaningful data (not all NaN/empty)
-        # Replace numpy.nan with a fill value for groupby if necessary, or ensure dropna=False
-        # For groupby, NaN is treated as a distinct group, which is usually fine.
         if all_lyr_atoms_df[ins_code_col].notna().any() and \
            (all_lyr_atoms_df[ins_code_col].astype(str).str.strip().replace('', 'nan') != 'nan').any():
             residue_instance_id_cols.append(ins_code_col)
