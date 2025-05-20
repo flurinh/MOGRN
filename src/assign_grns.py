@@ -21,14 +21,6 @@ from src.msa_grn import (
     generate_grn_msa_tables
 )
 
-from src.visualization_functions import (
-    plot_average_distances_by_helix,
-    plot_distance_heatmap,
-    print_residue_composition,
-    create_residue_conservation_plot,
-    plot_helix_logo_plots
-)
-
 
 def align_and_assign_grn(data_dict, output_dir='output', visualize=True):
     """
@@ -113,8 +105,8 @@ def align_and_assign_grn(data_dict, output_dir='output', visualize=True):
 
     global_ref = find_global_reference(rmsd_df.loc[pdb_list, pdb_list], type_reference_dict)
 
-    # extremely important, the reference we use is hardcoded here!!!!
-    global_ref = 'CnChR2_J230_refine9'
+    # extremely important, the reference below if hardcoded must be updated in msa_grn.py!!!!
+    # global_ref = 'CnChR2_J230_refine9'
 
     print(f"Global reference structure: {global_ref}")
 
@@ -201,56 +193,6 @@ def align_and_assign_grn(data_dict, output_dir='output', visualize=True):
             for pos, dist in closest_residues[:10]:
                 print(f"  {pos}: {dist:.2f}Å")
 
-        # Visualizations
-        if visualize:
-            try:
-                # Plot distance heatmap and line plots
-                if not distance_table.empty:
-                    fig1 = plot_average_distances_by_helix(distance_table)
-                    fig1.savefig(os.path.join(output_dir, 'distances_by_helix.png'), dpi=300, bbox_inches='tight')
-                    plt.close(fig1)
-                    print(f"Saved distance by helix plot to {os.path.join(output_dir, 'distances_by_helix.png')}")
-
-                    fig2 = plot_distance_heatmap(distance_table)
-                    fig2.savefig(os.path.join(output_dir, 'distance_heatmap.png'), dpi=300, bbox_inches='tight')
-                    plt.close(fig2)
-                    print(f"Saved distance heatmap to {os.path.join(output_dir, 'distance_heatmap.png')}")
-
-                # Analyze residue composition at key positions
-                if not msa_df.empty:
-                    positions_to_analyze = [f"{helix}.50" for helix in range(1, 8)]
-                    positions_in_df = [pos for pos in positions_to_analyze if pos in msa_df.columns]
-
-                    if positions_in_df:
-                        residue_composition = analyze_residue_composition(msa_df, positions_in_df)
-                        print_residue_composition(residue_composition)
-
-                    # Also analyze binding pocket positions
-                    binding_pocket_positions = ["3.37", "3.40", "6.48", "6.51", "7.43", "7.46", "7.51"]
-                    positions_in_df = [pos for pos in binding_pocket_positions if pos in msa_df.columns]
-
-                    if positions_in_df:
-                        binding_pocket_composition = analyze_residue_composition(msa_df, positions_in_df)
-                        print_residue_composition(binding_pocket_composition)
-
-                    # Create helix logo plots instead of sequence logo
-                    try:
-                        fig = plot_helix_logo_plots(msa_df)
-                        fig.savefig(os.path.join(output_dir, "helix_logo_plots.png"), dpi=300, bbox_inches='tight')
-                        plt.close(fig)
-                        print(f"Saved helix logo plots to {os.path.join(output_dir, 'helix_logo_plots.png')}")
-                    except Exception as e:
-                        print(f"[WARNING] Error creating helix logo plots: {str(e)}")
-
-                    # Create residue conservation plot
-                    fig = create_residue_conservation_plot(msa_df)
-                    fig.savefig(os.path.join(output_dir, "residue_conservation.png"), dpi=300, bbox_inches='tight')
-                    plt.close(fig)
-                    print(f"Saved residue conservation plot to {os.path.join(output_dir, 'residue_conservation.png')}")
-
-            except Exception as e:
-                print(f"Warning: Error during visualization: {e}")
-
         # Now run the tree-based alignment method as an additional approach
         print("\n=== Running Tree-Based Alignment as Additional Method ===")
         tree_based_results = run_tree_based_alignment(data_dict, output_dir, visualize)
@@ -316,7 +258,7 @@ def run_tree_based_alignment(data_dict, output_dir='output', visualize=True, met
     print("\nRunning tree-based alignment for GRN assignment...")
     
     # Create a subdirectory for tree-based outputs
-    tree_output_dir = os.path.join(output_dir, 'tree_based')
+    tree_output_dir = os.path.join(output_dir, 'opsin_grn_based')
     os.makedirs(tree_output_dir, exist_ok=True)
     print(f"Saving tree-based outputs to: {tree_output_dir}")
     
@@ -383,33 +325,6 @@ def run_tree_based_alignment(data_dict, output_dir='output', visualize=True, met
         for helix in range(1, 8):
             helix_positions = [col for col in msa_df.columns if col.startswith(f"{helix}.")]
             print(f"  Helix {helix}: {len(helix_positions)} positions")
-            
-        # Visualizations for tree-based approach
-        if visualize and not msa_df.empty:
-            try:
-                # Plot distance heatmap and line plots
-                if not distance_table.empty:
-                    fig1 = plot_average_distances_by_helix(distance_table)
-                    fig1.savefig(os.path.join(tree_output_dir, 'distances_by_helix_tree.png'), dpi=300, bbox_inches='tight')
-                    plt.close(fig1)
-                    
-                    fig2 = plot_distance_heatmap(distance_table)
-                    fig2.savefig(os.path.join(tree_output_dir, 'distance_heatmap_tree.png'), dpi=300, bbox_inches='tight')
-                    plt.close(fig2)
-                
-                # Create tree-based conservation and logo plots
-                fig = create_residue_conservation_plot(msa_df)
-                fig.savefig(os.path.join(tree_output_dir, "residue_conservation_tree.png"), dpi=300, bbox_inches='tight')
-                plt.close(fig)
-                
-                fig = plot_helix_logo_plots(msa_df)
-                fig.savefig(os.path.join(tree_output_dir, "helix_logo_plots_tree.png"), dpi=300, bbox_inches='tight')
-                plt.close(fig)
-                
-                print(f"Tree-based visualizations saved to {tree_output_dir}")
-                
-            except Exception as e:
-                print(f"Warning: Error during tree-based visualization: {e}")
         
         return {
             'seq_alignment_dicts': seq_alignment_dicts,

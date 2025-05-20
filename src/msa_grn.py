@@ -7,8 +7,11 @@ import numpy as np
 import pandas as pd
 import re
 import os
+from scipy.spatial.distance import cdist
 import matplotlib.pyplot as plt
+
 from src.visualization_functions import visualize_msa_distances
+
 
 def create_msa_table(seq_alignment_dicts, processed_structures_complete, global_ref, atom_type="all"):
     """
@@ -406,7 +409,6 @@ def create_msa_distance_table(seq_alignment_dicts, processed_structures_complete
     Returns:
         DataFrame: Distance table
     """
-    from scipy.spatial.distance import cdist
     
     # First, create the alignment table to get the position mapping
     msa_df = create_msa_table(

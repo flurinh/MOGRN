@@ -1,0 +1,12 @@
+Type,Value,Color
+Function,Anion Channel,#0053D6
+Function,Cation Channel,#00D45A
+Function,Chloride Pump,#FFD662
+Function,Proton Pump,#FF7D45
+Function,Sensor / Regulatory,#FF4C4C
+Function,Sodium Pump,#9D6CFF
+Domain,Archaea,#0053D6
+Domain,Bacteria,#00D45A
+Domain,Eukaryota,#FFD662
+Domain,Synthetic,#FF7D45
+Domain,Virus,#FF4C4C
