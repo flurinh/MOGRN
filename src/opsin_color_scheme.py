@@ -1,385 +1,406 @@
 """
 Opsin structure visualization color scheme.
-This module defines consistent color palettes for all opsin structure visualizations.
+This module defines consistent color palettes and color assignment logic
+for all opsin structure visualizations.
 """
 
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
-import seaborn as sns
-import numpy as np
+import numpy as np # Used in example usage
 from matplotlib.colors import LinearSegmentedColormap, ListedColormap
 
 # =============================================================================
-# MAIN COLOR PALETTES (Core Hex Codes)
+# I. CORE HEX CODES (Primary Palette Definitions)
 # =============================================================================
 
 OPSIN_COLORS = {
-    # Domain Palette: Blue -> Cyan -> Green
-    'domain_blue_dark': '#08306B',    # Deep Blue
-    'domain_blue_medium': '#08519C',
-    'domain_blue_light': '#2171B5',
-    'domain_cyan_medium': '#41B6C4',   # Cyan
-    'domain_cyan_light': '#7FCDBB',
-    'domain_green_medium': '#4CAF50',   # Green
-    'domain_green_light': '#A1D99B',
+    # A. WARM Palette (e.g., for Molecular Function, Hydrophobic AAs)
+    # Yellow -> Orange -> Red -> Dark Purple
+    'warm_yellow_lightest': '#FFFFD4',
+    'warm_yellow_light': '#FFFFB2',
+    'warm_yellow_medium': '#FED976',
+    'warm_orange_light': '#FEB24C',
+    'warm_orange_medium': '#FD8D3C',
+    'warm_red_medium': '#FC4E2A',
+    'warm_red_dark': '#E31A1C',
+    'warm_purple_medium': '#BD0026',
+    'warm_purple_dark': '#800026',
+    'warm_magenta_dark': '#5C001F',
 
-    # Molecular Function Palette: Yellow -> Orange -> Red -> Dark Purple
-    'mol_func_yellow_light': '#FFFFD4', # Lightest Yellow
-    'mol_func_yellow_medium': '#FED976',
-    'mol_func_orange_light': '#FEB24C',
-    'mol_func_orange_medium': '#FD8D3C',
-    'mol_func_red_medium': '#FC4E2A',
-    'mol_func_red_dark': '#E31A1C',
-    'mol_func_purple_medium': '#800080', # Purple
-    'mol_func_purple_dark': '#4B0082',   # Indigo/Dark Purple
+    # B. COLD Palette (e.g., for Domain, Polar/Charged AAs)
+    # Dark Blue -> Medium Blue -> Light Blue -> Cyan -> Light Green -> Medium Green
+    'cold_blue_darkest': '#08306B',
+    'cold_blue_dark': '#08519C',
+    'cold_blue_medium': '#2171B5',
+    'cold_blue_light': '#4292C6',
+    'cold_cyan_light': '#7FCDBB',
+    'cold_cyan_medium': '#41B6C4',
+    'cold_green_light': '#A1D99B',
+    'cold_green_medium': '#4CAF50',
+    'cold_green_dark': '#228B22',
 
-    # Grayscale: White to Black (Unchanged)
-    'gray_1': '#FFFFFF', 'gray_2': '#F0F0F0', 'gray_3': '#D9D9D9',
-    'gray_4': '#BDBDBD', 'gray_5': '#969696', 'gray_6': '#737373',
-    'gray_7': '#525252', 'gray_8': '#252525', 'gray_9': '#000000',
+    # C. GRAYSCALE Palette (White to Black)
+    'gray_1_white': '#FFFFFF',
+    'gray_2_lightest': '#F0F0F0',
+    'gray_3_light': '#D9D9D9',
+    'gray_4_light_mid': '#BDBDBD',
+    'gray_5_mid': '#969696',
+    'gray_6_dark_mid': '#737373',
+    'gray_7_dark': '#525252',
+    'gray_8_darkest': '#252525',
+    'gray_9_black': '#000000',
 
-    # Utility Colors (Can be adjusted or expanded)
-    'teal': '#4DB6AC',
-    'pink': '#F48FB1',
-    'white': '#FFFFFF',
-    'black': '#000000'
+    # D. UTILITY & ACCENT Colors (Distinct from Warm/Cold/Gray)
+    'utility_teal': '#4DB6AC',
+    'utility_pink': '#F48FB1',
+    'utility_lime': '#AFE1AF',
+    'utility_lavender': '#E6E6FA',
+    'white': '#FFFFFF', # Alias for gray_1_white
+    'black': '#000000', # Alias for gray_9_black
 }
-
-# Backwards compatibility & aliases (adjust as needed)
-OPSIN_COLORS['blue_dark'] = OPSIN_COLORS['domain_blue_dark']
-OPSIN_COLORS['blue_light'] = OPSIN_COLORS['domain_blue_light']
-OPSIN_COLORS['yellow'] = OPSIN_COLORS['mol_func_yellow_medium']
-OPSIN_COLORS['orange'] = OPSIN_COLORS['mol_func_orange_medium']
-OPSIN_COLORS['red'] = OPSIN_COLORS['mol_func_red_dark']
-OPSIN_COLORS['purple'] = OPSIN_COLORS['mol_func_purple_medium']
-OPSIN_COLORS['green'] = OPSIN_COLORS['domain_green_medium']
-OPSIN_COLORS['gray_light'] = OPSIN_COLORS['gray_3']
-OPSIN_COLORS['gray_dark'] = OPSIN_COLORS['gray_7']
+OPSIN_COLORS['white'] = OPSIN_COLORS['gray_1_white'] # Explicit alias
+OPSIN_COLORS['black'] = OPSIN_COLORS['gray_9_black'] # Explicit alias
 
 
 # =============================================================================
-# PROPERTY COLOR MAPS (NEW DEFINITIONS)
+# II. SEQUENTIAL COLOR LISTS (Derived from Core Hex Codes)
 # =============================================================================
 
-DOMAIN_PROPERTY_COLORS = [
-    OPSIN_COLORS['mol_func_yellow_light'],
-    OPSIN_COLORS['mol_func_yellow_medium'],
-    OPSIN_COLORS['mol_func_orange_light'],
-    OPSIN_COLORS['mol_func_orange_medium'],
-    OPSIN_COLORS['mol_func_red_medium'],
-    OPSIN_COLORS['mol_func_red_dark'],
-    OPSIN_COLORS['mol_func_purple_medium'],
-    OPSIN_COLORS['mol_func_purple_dark'],
+WARM_SEQUENTIAL_COLORS = [
+    OPSIN_COLORS['warm_yellow_lightest'], OPSIN_COLORS['warm_yellow_medium'],
+    OPSIN_COLORS['warm_orange_light'], OPSIN_COLORS['warm_orange_medium'],
+    OPSIN_COLORS['warm_red_medium'], OPSIN_COLORS['warm_red_dark'],
+    OPSIN_COLORS['warm_purple_medium'], OPSIN_COLORS['warm_purple_dark']
 ]
-DOMAIN_PROPERTY_CMAP = LinearSegmentedColormap.from_list('domain_property_map', DOMAIN_PROPERTY_COLORS)
 
-MOL_FUNC_PROPERTY_COLORS = [
-    OPSIN_COLORS['domain_blue_dark'],
-    OPSIN_COLORS['domain_blue_medium'],
-    OPSIN_COLORS['domain_blue_light'],
-    OPSIN_COLORS['domain_cyan_medium'],
-    OPSIN_COLORS['domain_cyan_light'],
-    OPSIN_COLORS['domain_green_medium'],
-    OPSIN_COLORS['domain_green_light'],
+COLD_SEQUENTIAL_COLORS = [
+    OPSIN_COLORS['cold_blue_darkest'], OPSIN_COLORS['cold_blue_dark'],
+    OPSIN_COLORS['cold_blue_medium'], OPSIN_COLORS['cold_blue_light'],
+    OPSIN_COLORS['cold_cyan_medium'], OPSIN_COLORS['cold_cyan_light'],
+    OPSIN_COLORS['cold_green_medium'], OPSIN_COLORS['cold_green_dark']
 ]
-MOL_FUNC_PROPERTY_CMAP = LinearSegmentedColormap.from_list('mol_func_property_map', MOL_FUNC_PROPERTY_COLORS)
+
+GRAYSCALE_SEQUENTIAL_COLORS = [
+    OPSIN_COLORS['gray_1_white'], OPSIN_COLORS['gray_2_lightest'], OPSIN_COLORS['gray_3_light'],
+    OPSIN_COLORS['gray_4_light_mid'], OPSIN_COLORS['gray_5_mid'], OPSIN_COLORS['gray_6_dark_mid'],
+    OPSIN_COLORS['gray_7_dark'], OPSIN_COLORS['gray_8_darkest'], OPSIN_COLORS['gray_9_black']
+]
 
 # =============================================================================
-# RMSD COLOR MAPS (USING SPECTRAL OR GRAYSCALE AS BEFORE)
+# III. CATEGORICAL COLOR DEFINITIONS (Predefined Mappings)
 # =============================================================================
-# Spectral RMSD: (Cold -> Warm, e.g., Blue -> Yellow/Orange)
-# This can remain independent of the new property colors, or you can adapt it.
-# For now, keeping the previous spectral definition:
-_rmsd_spectral_temp = [
-    OPSIN_COLORS['domain_blue_dark'], # Low RMSD
-    OPSIN_COLORS['domain_blue_light'],
-    OPSIN_COLORS['white'],
-    OPSIN_COLORS['mol_func_yellow_medium'],
-    OPSIN_COLORS['mol_func_orange_medium'] # High RMSD
-]
-RMSD_CMAP = LinearSegmentedColormap.from_list('rmsd_spectral', _rmsd_spectral_temp)
 
-RMSD_COMPACT_COLORS_SPECTRAL = [
-    OPSIN_COLORS['domain_blue_dark'], # e.g., 0 - 1.5 Å
-    OPSIN_COLORS['domain_blue_light'],# e.g., 1.5 - 3.0 Å
-    OPSIN_COLORS['mol_func_orange_medium']   # e.g., > 3.0 Å
-]
-RMSD_BOUNDS = [0, 1.5, 3.0, 5.0]
-RMSD_COMPACT_CMAP = ListedColormap(RMSD_COMPACT_COLORS_SPECTRAL)
-RMSD_DISCRETE_CMAP = RMSD_COMPACT_CMAP
+# A. For Property 1 (Molecular Function - uses WARM palette)
+# Property 1 values: ['Sensor / Regulatory', 'Proton Pump', 'Anion Channel',
+#                     'Chloride Pump', 'Unknown', 'Cation Channel', 'Sodium Pump']
+PROPERTY1_COLORS_PREDEFINED = {
+    'Sensor / Regulatory': OPSIN_COLORS['warm_yellow_medium'],
+    'Proton Pump':         OPSIN_COLORS['warm_orange_medium'],
+    'Anion Channel':       OPSIN_COLORS['warm_red_medium'],
+    'Chloride Pump':       OPSIN_COLORS['warm_red_dark'],      # Darker shade for related pump
+    'Cation Channel':      OPSIN_COLORS['warm_purple_medium'],
+    'Sodium Pump':         OPSIN_COLORS['warm_purple_dark'],   # Darker shade for related pump
+    'Unknown':             OPSIN_COLORS['gray_3_light'],     # Specific key for 'Unknown'
+    'Other_Property1':     OPSIN_COLORS['gray_5_mid']        # For a generic 'Other' if it appears
+}
+# Ensure 'Unknown_Property1' can be used as an alias if needed by some parts of code
+PROPERTY1_COLORS_PREDEFINED['Unknown_Property1'] = PROPERTY1_COLORS_PREDEFINED['Unknown']
 
-# Grayscale RMSD (Unchanged)
-RMSD_GRAYSCALE_COLORS = [OPSIN_COLORS[f'gray_{i}'] for i in range(1,10) if f'gray_{i}' in OPSIN_COLORS]
-RMSD_GRAYSCALE_CMAP = LinearSegmentedColormap.from_list('rmsd_grayscale', RMSD_GRAYSCALE_COLORS)
-RMSD_GRAYSCALE_COMPACT_COLORS = [OPSIN_COLORS['gray_1'], OPSIN_COLORS['gray_5'], OPSIN_COLORS['gray_9']]
+
+# B. For Property 2 (Domain - uses COLD palette)
+# Property 2 values: ['Eukaryota', 'Bacteria', 'Synthetic', 'Archaea', 'Unknown', 'Virus']
+PROPERTY2_COLORS_PREDEFINED = {
+    'Eukaryota':           OPSIN_COLORS['cold_blue_medium'],
+    'Bacteria':            OPSIN_COLORS['cold_blue_darkest'], # Often many, give it a strong base color
+    'Archaea':             OPSIN_COLORS['cold_cyan_medium'],
+    'Virus':               OPSIN_COLORS['cold_green_light'],
+    'Synthetic':           OPSIN_COLORS['cold_green_dark'],   # Distinct cold color
+    'Unknown':             OPSIN_COLORS['gray_3_light'],      # Specific key for 'Unknown'
+    'Other_Property2':     OPSIN_COLORS['gray_5_mid']         # For a generic 'Other' if it appears
+}
+# Ensure 'Unknown_Property2' can be used as an alias
+PROPERTY2_COLORS_PREDEFINED['Unknown_Property2'] = PROPERTY2_COLORS_PREDEFINED['Unknown']
+
+
+# C. For Helix Colors (combines COLD to WARM spectrum)
+HELIX_NUMBER_COLORS = {
+    1: OPSIN_COLORS['cold_blue_darkest'],   # Helix 1 (Cold start)
+    2: OPSIN_COLORS['cold_blue_medium'],
+    3: OPSIN_COLORS['cold_cyan_medium'],
+    4: OPSIN_COLORS['warm_yellow_medium'],  # Mid-point transition to Warm
+    5: OPSIN_COLORS['warm_orange_medium'],
+    6: OPSIN_COLORS['warm_red_dark'],
+    7: OPSIN_COLORS['warm_purple_dark'],    # Helix 7 (Warm end)
+    'retinal': OPSIN_COLORS['utility_pink'] # Special ligand color
+}
+# String version for convenience if helix numbers are strings in data
+HELIX_STRING_COLORS = {str(k): v for k, v in HELIX_NUMBER_COLORS.items()}
+
+# D. For Amino Acid Logo (categorized by property, using WARM, COLD, and UTILITY)
+AMINO_ACID_LOGO_COLORS = {
+    # Hydrophobic (WARM palette primarily)
+    'A': OPSIN_COLORS['warm_yellow_lightest'], 'V': OPSIN_COLORS['warm_yellow_medium'],
+    'I': OPSIN_COLORS['warm_orange_light'], 'L': OPSIN_COLORS['warm_orange_medium'],
+    'M': OPSIN_COLORS['warm_red_medium'],
+    'F': OPSIN_COLORS['warm_red_dark'], 'Y': OPSIN_COLORS['warm_purple_medium'], 'W': OPSIN_COLORS['warm_purple_dark'],
+    # Polar Neutral (COLD palette primarily)
+    'S': OPSIN_COLORS['cold_green_light'], 'T': OPSIN_COLORS['cold_green_medium'],
+    'N': OPSIN_COLORS['cold_cyan_light'], 'Q': OPSIN_COLORS['cold_cyan_medium'],
+    # Special (UTILITY or distinct GRAYSCALE)
+    'G': OPSIN_COLORS['gray_4_light_mid'], 'P': OPSIN_COLORS['utility_teal'],
+    'C': OPSIN_COLORS['utility_pink'],
+    # Charged Basic (+) (COLD palette - blues)
+    'K': OPSIN_COLORS['cold_blue_light'], 'R': OPSIN_COLORS['cold_blue_medium'], 'H': OPSIN_COLORS['cold_blue_dark'],
+    # Charged Acidic (-) (WARM palette - distinct reds/magentas)
+    'D': OPSIN_COLORS['warm_magenta_dark'], 'E': OPSIN_COLORS['warm_purple_dark'],
+    '-': OPSIN_COLORS['gray_1_white'] # Gap color
+}
+# Ensure all standard AAs have a color (fallback to a mid-gray)
+_STANDARD_AAS = "ACDEFGHIKLMNPQRSTVWY-"
+for aa_code in _STANDARD_AAS:
+    if aa_code not in AMINO_ACID_LOGO_COLORS:
+        AMINO_ACID_LOGO_COLORS[aa_code] = OPSIN_COLORS['gray_5_mid']
+
+# E. Specific Status Colors
+STATUS_EXPERIMENTAL_COLOR = OPSIN_COLORS['black']
+STATUS_PREDICTED_COLOR = OPSIN_COLORS['utility_lime']
+
+
+# =============================================================================
+# IV. COLORMAPS (for continuous data or specific visualizations)
+# =============================================================================
+
+# A. Property Colormaps (derived from sequential lists)
+WARM_PROPERTY_CMAP = LinearSegmentedColormap.from_list('opsin_warm_property_map', WARM_SEQUENTIAL_COLORS)
+COLD_PROPERTY_CMAP = LinearSegmentedColormap.from_list('opsin_cold_property_map', COLD_SEQUENTIAL_COLORS)
+
+# B. RMSD Colormaps
+RMSD_GRAYSCALE_CMAP = LinearSegmentedColormap.from_list('opsin_rmsd_grayscale', GRAYSCALE_SEQUENTIAL_COLORS)
+RMSD_GRAYSCALE_COMPACT_COLORS = [OPSIN_COLORS['gray_1_white'], OPSIN_COLORS['gray_5_mid'], OPSIN_COLORS['gray_9_black']]
 RMSD_GRAYSCALE_COMPACT_CMAP = ListedColormap(RMSD_GRAYSCALE_COMPACT_COLORS)
-
-# =============================================================================
-# DISTANCE COLOR MAPS (ADAPTED)
-# =============================================================================
-# Using reversed Molecular Function palette (Dark Purple for far, Yellow for close)
-DISTANCE_CMAP_MOL_FUNC_REV = LinearSegmentedColormap.from_list(
-    'distance_mol_func_rev', MOL_FUNC_PROPERTY_COLORS[::-1]
-)
-# Using reversed Domain palette (Green for far, Dark Blue for close)
-DISTANCE_CMAP_DOMAIN_REV = LinearSegmentedColormap.from_list(
-    'distance_domain_rev', DOMAIN_PROPERTY_COLORS[::-1]
-)
-# Default distance map - choose one, e.g., mol_func_rev
-DISTANCE_CMAP = DISTANCE_CMAP_MOL_FUNC_REV
-
-# =============================================================================
-# DIVERGING COLOR MAP (ADAPTED)
-# =============================================================================
-DIVERGING_COLORS = [
-    OPSIN_COLORS['domain_blue_dark'], # Strong negative
-    OPSIN_COLORS['domain_blue_light'],# Weak negative
-    OPSIN_COLORS['white'],            # Neutral
-    OPSIN_COLORS['mol_func_orange_light'],# Weak positive
-    OPSIN_COLORS['mol_func_red_dark']  # Strong positive
+_rmsd_spectral_colors = [
+    OPSIN_COLORS['cold_blue_darkest'], OPSIN_COLORS['cold_blue_light'], OPSIN_COLORS['white'],
+    OPSIN_COLORS['warm_yellow_medium'], OPSIN_COLORS['warm_orange_medium']
 ]
-DIVERGING_CMAP = LinearSegmentedColormap.from_list('opsin_diverging_new', DIVERGING_COLORS)
+
+RMSD_CUSTOM_GRAY_COLORS = [
+    OPSIN_COLORS['gray_2_lightest'], # Lightest gray (almost white)
+    OPSIN_COLORS['gray_5_mid'],      # Medium gray
+    OPSIN_COLORS['gray_8_darkest']      # Dark gray (not black)
+]
+RMSD_CUSTOM_GRAY_CMAP = ListedColormap(RMSD_CUSTOM_GRAY_COLORS)
+
+RMSD_SPECTRAL_CMAP = LinearSegmentedColormap.from_list('opsin_rmsd_spectral', _rmsd_spectral_colors)
+RMSD_SPECTRAL_COMPACT_CMAP = ListedColormap([
+    OPSIN_COLORS['cold_blue_darkest'], OPSIN_COLORS['cold_blue_light'], OPSIN_COLORS['warm_orange_medium']
+])
+
+RMSD_WHITE_TO_DARKGRAY_COLORS = [
+    OPSIN_COLORS['gray_1_white'],      # For min RMSD value
+    OPSIN_COLORS['gray_8_darkest']       # For max RMSD value
+]   
+RMSD_WHITE_TO_DARKGRAY_CMAP = LinearSegmentedColormap.from_list(
+    'opsin_rmsd_white_to_darkgray',
+    RMSD_WHITE_TO_DARKGRAY_COLORS
+)
+
+RMSD_BOUNDS = [0.0, 1.0, 2.5, 5.0]
+
+# C. Distance Colormaps
+DISTANCE_WARM_REVERSED_CMAP = LinearSegmentedColormap.from_list(
+    'opsin_distance_warm_rev', WARM_SEQUENTIAL_COLORS[::-1]
+)
+DISTANCE_COLD_REVERSED_CMAP = LinearSegmentedColormap.from_list(
+    'opsin_distance_cold_rev', COLD_SEQUENTIAL_COLORS[::-1]
+)
+DEFAULT_DISTANCE_CMAP = DISTANCE_WARM_REVERSED_CMAP
+
+# D. Diverging Colormap
+DIVERGING_COLORS_LIST = [
+    OPSIN_COLORS['cold_blue_darkest'], OPSIN_COLORS['cold_blue_light'], OPSIN_COLORS['white'],
+    OPSIN_COLORS['warm_orange_light'], OPSIN_COLORS['warm_red_dark']
+]
+DIVERGING_CMAP = LinearSegmentedColormap.from_list('opsin_diverging', DIVERGING_COLORS_LIST)
+
+# E. Helix Colormap
+HELIX_CMAP_LIST = [HELIX_NUMBER_COLORS[i] for i in range(1, 8)]
+HELIX_CMAP = ListedColormap(HELIX_CMAP_LIST)
+
 
 # =============================================================================
-# HELIX COLORS (NEW DEFINITION: Blue -> Cyan -> Green -> Yellow -> Orange -> Red -> Purple)
+# V. DYNAMIC COLOR ASSIGNMENT FUNCTION (for categorical data)
 # =============================================================================
-HELIX_COLORS = {
-    1: OPSIN_COLORS['domain_blue_dark'],     # Start with Domain Palette
-    2: OPSIN_COLORS['domain_cyan_medium'],
-    3: OPSIN_COLORS['domain_green_medium'],
-    4: OPSIN_COLORS['mol_func_yellow_medium'],# Transition to Mol Func Palette
-    5: OPSIN_COLORS['mol_func_orange_medium'],
-    6: OPSIN_COLORS['mol_func_red_dark'],
-    7: OPSIN_COLORS['mol_func_purple_dark'],  # End with Mol Func Palette
-    'retinal': OPSIN_COLORS['pink'] # A distinct color for retinal
-}
-HELIX_COLORS_STR = {str(k): v for k, v in HELIX_COLORS.items() if isinstance(k, int)}
-HELIX_COLORS_STR['retinal'] = HELIX_COLORS['retinal']
-HELIX_COLORS_LIST = [HELIX_COLORS[i] for i in range(1, 8)]
 
-def get_helix_cmap():
-    return ListedColormap(HELIX_COLORS_LIST)
-
-# =============================================================================
-# CATEGORICAL COLORS (GROUPS, DOMAINS - PREDEFINED)
-# =============================================================================
-# For Molecular Function (uses new Yellow -> Purple palette)
-GROUP_COLORS_PREDEFINED = {
-    # Key groups mapped to distinct points in the new Mol Func palette
-    'Rhodopsin': OPSIN_COLORS['mol_func_red_dark'],
-    'Cone_Opsin': OPSIN_COLORS['mol_func_orange_medium'],
-    'Visual_Opsin': OPSIN_COLORS['mol_func_yellow_medium'],
-    'Non_visual_Opsin': OPSIN_COLORS['mol_func_yellow_light'],
-    'Melanopsin': OPSIN_COLORS['mol_func_purple_medium'], # Distinct end
-    'Photoisomerase': OPSIN_COLORS['domain_cyan_medium'], # Cross-palette for distinction
-    'Cnidopsin': OPSIN_COLORS['domain_green_medium'],   # Cross-palette for distinction
-    'Bistable': OPSIN_COLORS['teal'],                  # Utility color
-    'Other': OPSIN_COLORS['gray_5'],
-    'Unknown': OPSIN_COLORS['gray_3']
-}
-
-# For Domains (uses new Blue -> Green palette)
-DOMAIN_COLORS_PREDEFINED = {
-    'Bacteria': OPSIN_COLORS['domain_blue_dark'],
-    'Eukaryota': OPSIN_COLORS['domain_blue_medium'],
-    'Archaea': OPSIN_COLORS['domain_cyan_medium'],
-    'Virus': OPSIN_COLORS['domain_green_light'],
-    'Synthetic': OPSIN_COLORS['mol_func_orange_light'], # Cross-palette for distinction
-    'Unknown': OPSIN_COLORS['gray_3']
-}
-
-# Function to dynamically assign colors (Updated logic for fallback)
-def get_group_colors(group_names, palette_type='default', custom_predefined=None):
+def get_categorical_colors(item_names, property_type='property1', custom_predefined=None):
     """
-    Dynamically assigns colors to a list of group names.
+    Assigns colors to a list of item names based on a specified property type.
+    Uses predefined colors first, then falls back to a sequential palette.
+
     Args:
-        palette_type (str): 'mol_func', 'domain', 'gray', 'helix', or 'default' (acts like 'mol_func').
+        item_names (list or set): Unique names of items to color.
+        property_type (str):
+            'property1' (e.g., Molecular Function - uses WARM palette).
+            'property2' (e.g., Domain - uses COLD palette).
+            'grayscale' (uses GRAYSCALE palette).
+            'helix' (uses HELIX_STRING_COLORS directly if item_names are helix numbers/strings).
+            'custom' (requires `custom_predefined` to be set).
+        custom_predefined (dict, optional): A custom dictionary of item_name:color pairs.
+
+    Returns:
+        dict: A dictionary mapping item_name to its assigned hex color string.
     """
-    if isinstance(group_names, dict):
-        unique_groups = sorted(list(set(group_names.keys())))
+    if isinstance(item_names, dict):
+        unique_items = sorted(list(set(item_names.keys())))
     else:
-        unique_groups = sorted(list(set(group_names)))
+        unique_items = sorted(list(set(str(item) for item in item_names))) # Ensure strings for dict keys
 
     assigned_colors = {}
 
-    # Determine the primary set of predefined colors and the fallback palette
-    if custom_predefined is not None:
-        predefined = custom_predefined
-        # Fallback logic for custom_predefined needs to be context-aware or generic
-        if palette_type == 'mol_func' or palette_type == 'default':
-            fallback_palette_colors = MOL_FUNC_PROPERTY_COLORS
-        elif palette_type == 'domain':
-            fallback_palette_colors = DOMAIN_PROPERTY_COLORS
-        elif palette_type == 'gray':
-            fallback_palette_colors = RMSD_GRAYSCALE_COLORS
-        elif palette_type == 'helix':
-            fallback_palette_colors = HELIX_COLORS_LIST + [OPSIN_COLORS['pink']] # Added retinal color
-        else: # Generic fallback for custom_predefined
-            fallback_palette_colors = MOL_FUNC_PROPERTY_COLORS + DOMAIN_PROPERTY_COLORS # Mix
-    elif palette_type == 'mol_func' or palette_type == 'default':
-        predefined = GROUP_COLORS_PREDEFINED
-        fallback_palette_colors = MOL_FUNC_PROPERTY_COLORS
-    elif palette_type == 'domain':
-        predefined = DOMAIN_COLORS_PREDEFINED
-        fallback_palette_colors = DOMAIN_PROPERTY_COLORS
-    elif palette_type == 'gray':
-        predefined = {}
-        fallback_palette_colors = RMSD_GRAYSCALE_COLORS
-    elif palette_type == 'helix':
-        predefined = {} # Usually HELIX_COLORS is used directly for the 7TMs
-        fallback_palette_colors = HELIX_COLORS_LIST + [OPSIN_COLORS['pink']]
-    else: # Unknown palette_type string
-        predefined = {}
-        fallback_palette_colors = MOL_FUNC_PROPERTY_COLORS + DOMAIN_PROPERTY_COLORS # Mix
+    if property_type == 'property1':
+        predefined_map = PROPERTY1_COLORS_PREDEFINED
+        fallback_palette = WARM_SEQUENTIAL_COLORS
+    elif property_type == 'property2':
+        predefined_map = PROPERTY2_COLORS_PREDEFINED
+        fallback_palette = COLD_SEQUENTIAL_COLORS
+    elif property_type == 'grayscale':
+        predefined_map = {}
+        fallback_palette = GRAYSCALE_SEQUENTIAL_COLORS
+    elif property_type == 'helix':
+        predefined_map = HELIX_STRING_COLORS
+        fallback_palette = HELIX_CMAP_LIST
+    elif property_type == 'custom' and custom_predefined is not None:
+        predefined_map = custom_predefined
+        fallback_palette = WARM_SEQUENTIAL_COLORS + COLD_SEQUENTIAL_COLORS
+    else:
+        print(f"Warning: Unknown property_type '{property_type}'. Using Property1/Warm palette as default.")
+        predefined_map = PROPERTY1_COLORS_PREDEFINED
+        fallback_palette = WARM_SEQUENTIAL_COLORS
 
-    # Assign predefined colors
-    for group in unique_groups:
-        if group in predefined:
-            assigned_colors[group] = predefined[group]
+    for item in unique_items:
+        if item in predefined_map:
+            assigned_colors[item] = predefined_map[item]
+        elif str(item) in predefined_map: # Check for string version too
+             assigned_colors[item] = predefined_map[str(item)]
 
-    # Assign from fallback_palette for remaining groups
-    remaining_groups = [g for g in unique_groups if g not in assigned_colors]
-    if not remaining_groups:
+
+    remaining_items = [item for item in unique_items if item not in assigned_colors]
+    if not remaining_items:
         return assigned_colors
 
-    num_remaining = len(remaining_groups)
-    colors_to_assign = []
-    if num_remaining <= len(fallback_palette_colors):
-        colors_to_assign = fallback_palette_colors[:num_remaining]
+    num_remaining = len(remaining_items)
+    colors_to_assign_from_fallback = []
+    if not fallback_palette: # Handle empty fallback_palette case
+        print(f"Warning: Fallback palette for property_type '{property_type}' is empty. Remaining items will get gray.")
+        for _ in range(num_remaining):
+            colors_to_assign_from_fallback.append(OPSIN_COLORS['gray_5_mid'])
+    elif num_remaining <= len(fallback_palette):
+        colors_to_assign_from_fallback = fallback_palette[:num_remaining]
     else:
         for i in range(num_remaining):
-            colors_to_assign.append(fallback_palette_colors[i % len(fallback_palette_colors)])
+            colors_to_assign_from_fallback.append(fallback_palette[i % len(fallback_palette)])
 
-    for i, group in enumerate(remaining_groups):
-        assigned_colors[group] = colors_to_assign[i]
+    for i, item in enumerate(remaining_items):
+        assigned_colors[item] = colors_to_assign_from_fallback[i]
+
     return assigned_colors
 
 
 # =============================================================================
-# AMINO ACID COLORS FOR LOGO PLOTS (ADAPTED)
+# VI. MATPLOTLIB STYLING AND REGISTRATION
 # =============================================================================
-AMINO_ACID_COLORS_COMBINED = {
-    # Hydrophobic (Mol Func - Yellow/Orange)
-    'A': OPSIN_COLORS['mol_func_yellow_light'], 'V': OPSIN_COLORS['mol_func_yellow_medium'],
-    'I': OPSIN_COLORS['mol_func_orange_light'], 'L': OPSIN_COLORS['mol_func_orange_medium'],
-    'M': OPSIN_COLORS['mol_func_red_medium'], 'F': OPSIN_COLORS['mol_func_red_dark'],
-    'Y': OPSIN_COLORS['mol_func_purple_medium'], 'W': OPSIN_COLORS['mol_func_purple_dark'],
-    # Polar Neutral (Domain - Blue/Cyan/Green)
-    'S': OPSIN_COLORS['domain_green_light'], 'T': OPSIN_COLORS['domain_green_medium'],
-    'N': OPSIN_COLORS['domain_cyan_light'], 'Q': OPSIN_COLORS['domain_cyan_medium'],
-    # Special (Neutrals or distinct utility)
-    'G': OPSIN_COLORS['gray_3'], 'P': OPSIN_COLORS['teal'],
-    'C': OPSIN_COLORS['pink'], # Was purple_medium, now pink for more distinction
-    # Charged Basic (+) (Domain - Blues)
-    'K': OPSIN_COLORS['domain_blue_light'], 'R': OPSIN_COLORS['domain_blue_medium'],
-    'H': OPSIN_COLORS['domain_blue_dark'],
-    # Charged Acidic (-) (Mol Func - Reds, distinct from hydrophobic oranges)
-    'D': OPSIN_COLORS['mol_func_red_dark'], 'E': OPSIN_COLORS['mol_func_red_medium'], # Using more distinct reds
-    '-': OPSIN_COLORS['gray_1']
-}
-_standard_aas = "ACDEFGHIKLMNPQRSTVWY-"
-for aa in _standard_aas:
-    if aa not in AMINO_ACID_COLORS_COMBINED:
-        AMINO_ACID_COLORS_COMBINED[aa] = OPSIN_COLORS['gray_5']
 
-# =============================================================================
-# UTILITIES & REGISTRATION
-# =============================================================================
-def register_colormaps():
-    """Register custom colormaps with matplotlib."""
-    cmap_dict = {
-        'opsin_domain_prop': DOMAIN_PROPERTY_CMAP,
-        'opsin_mol_func_prop': MOL_FUNC_PROPERTY_CMAP,
-        'opsin_rmsd_spectral': RMSD_CMAP,
-        'opsin_rmsd_spectral_compact': RMSD_COMPACT_CMAP,
-        'opsin_rmsd_grayscale': RMSD_GRAYSCALE_CMAP,
-        'opsin_distance_default': DISTANCE_CMAP,
-        'opsin_distance_mol_func_rev': DISTANCE_CMAP_MOL_FUNC_REV,
-        'opsin_distance_domain_rev': DISTANCE_CMAP_DOMAIN_REV,
+def register_opsin_colormaps():
+    """Registers all custom colormaps with Matplotlib."""
+    colormaps_to_register = {
+        'opsin_warm_property': WARM_PROPERTY_CMAP,
+        'opsin_cold_property': COLD_PROPERTY_CMAP,
+        'opsin_rmsd_gray': RMSD_GRAYSCALE_CMAP,
+        'opsin_rmsd_custom_gray': RMSD_CUSTOM_GRAY_CMAP,
+        'opsin_rmsd_gray_compact': RMSD_GRAYSCALE_COMPACT_CMAP,
+        'opsin_rmsd_spectral': RMSD_SPECTRAL_CMAP,
+        'opsin_rmsd_spectral_compact': RMSD_SPECTRAL_COMPACT_CMAP,
+        'opsin_distance_warm_rev': DISTANCE_WARM_REVERSED_CMAP,
+        'opsin_distance_cold_rev': DISTANCE_COLD_REVERSED_CMAP,
+        'opsin_distance_default': DEFAULT_DISTANCE_CMAP,
         'opsin_diverging': DIVERGING_CMAP,
-        'opsin_helices': get_helix_cmap()
+        'opsin_helices': HELIX_CMAP
     }
-    for name, cmap in cmap_dict.items():
-        try: plt.colormaps.register(name=name, cmap=cmap)
-        except AttributeError: # Older matplotlib
-            from matplotlib.cm import register_cmap
-            register_cmap(name=name, cmap=cmap)
-        except Exception as e: print(f"[WARNING] Could not register colormap '{name}': {e}")
+    for name, cmap in colormaps_to_register.items():
+        try:
+            plt.colormaps.register(name=name, cmap=cmap)
+        except ValueError:
+            pass
+        except Exception as e:
+            print(f"[opsin_color_scheme] Warning: Could not register colormap '{name}': {e}")
+    plt.colormaps.register(name='opsin_rmsd_white_to_darkgray', cmap=RMSD_WHITE_TO_DARKGRAY_CMAP)
 
-register_colormaps()
-
-def apply_style(): # (Keep your existing apply_style function)
+def apply_opsin_style():
+    """Applies a consistent Matplotlib style for opsin visualizations."""
     plt.style.use('default')
     style_params = {
-        'font.family': 'sans-serif', 'font.sans-serif': ['Arial', 'Helvetica', 'DejaVu Sans'],
-        'font.size': 10, 'axes.labelsize': 12, 'axes.titlesize': 14,
-        'xtick.labelsize': 10, 'ytick.labelsize': 10, 'legend.fontsize': 10,
-        'figure.titlesize': 16, 'axes.spines.top': False, 'axes.spines.right': False,
-        'axes.grid': True, 'grid.alpha': 0.3, 'grid.linestyle': '--',
-        'lines.linewidth': 1.5, 'lines.markersize': 6,
-        'axes.labelpad': 8, 'axes.titlepad': 12, 'legend.frameon': False,
-        'savefig.dpi': 300, 'savefig.bbox': 'tight', 'figure.facecolor': 'white'
+        'font.family': 'sans-serif',
+        'font.sans-serif': ['Arial', 'Helvetica', 'DejaVu Sans', 'Bitstream Vera Sans'],
+        'font.size': 10, 'axes.labelsize': 11, 'axes.titlesize': 12,
+        'xtick.labelsize': 9, 'ytick.labelsize': 9, 'legend.fontsize': 9,
+        'legend.title_fontsize': 10, 'figure.titlesize': 14,
+        'axes.spines.top': False, 'axes.spines.right': False, 'axes.grid': True,
+        'grid.alpha': 0.4, 'grid.linestyle': ':', 'lines.linewidth': 1.5,
+        'lines.markersize': 5, 'axes.labelpad': 6, 'axes.titlepad': 10,
+        'legend.frameon': False, 'savefig.dpi': 300, 'savefig.bbox': 'tight',
+        'figure.facecolor': OPSIN_COLORS['white']
     }
     try:
         plt.rcParams.update(style_params)
-        sns.set_style("ticks", rc=style_params)
     except Exception as e:
-        print(f"[WARNING] Could not fully apply style settings: {e}")
+        print(f"[opsin_color_scheme] Warning: Could not fully apply style settings: {e}")
     return plt.rcParams.copy()
 
-apply_style()
+register_opsin_colormaps()
+_ = apply_opsin_style()
+
 
 # =============================================================================
-# EXAMPLE USAGE
+# VII. EXAMPLE USAGE (for testing and demonstration)
 # =============================================================================
 if __name__ == "__main__":
-    fig, axs = plt.subplots(8, 1, figsize=(10, 16)) # Increased to 8 for new maps
+    print("--- Opsin Color Scheme Demo ---")
+
+    print("\nTesting get_categorical_colors:")
+    prop1_actual_values = ['Sensor / Regulatory', 'Proton Pump', 'Anion Channel',
+                           'Chloride Pump', 'Unknown', 'Cation Channel', 'Sodium Pump', 'NewFunctionX']
+    prop1_item_colors = get_categorical_colors(prop1_actual_values, property_type='property1')
+    print(f"Property 1 (Function) Colors for {prop1_actual_values}:")
+    for item, color in prop1_item_colors.items(): print(f"  {item}: {color}")
+
+    prop2_actual_values = ['Eukaryota', 'Bacteria', 'Synthetic', 'Archaea', 'Unknown', 'Virus', 'NewDomainY']
+    prop2_item_colors = get_categorical_colors(prop2_actual_values, property_type='property2')
+    print(f"\nProperty 2 (Domain) Colors for {prop2_actual_values}:")
+    for item, color in prop2_item_colors.items(): print(f"  {item}: {color}")
+
+    helix_items = ['1', '3', '7', 'retinal', 'loop12']
+    helix_item_colors = get_categorical_colors(helix_items, property_type='helix')
+    print("\nHelix Item Colors:", helix_item_colors)
+
+    cmaps_to_show = {
+        'Warm Property': WARM_PROPERTY_CMAP, 'Cold Property': COLD_PROPERTY_CMAP,
+        'RMSD Grayscale': RMSD_GRAYSCALE_CMAP, 'RMSD Grayscale Compact': RMSD_GRAYSCALE_COMPACT_CMAP,
+        'Distance (Warm Rev)': DISTANCE_WARM_REVERSED_CMAP, 'Diverging': DIVERGING_CMAP,
+        'Helices (1-7)': HELIX_CMAP
+    }
+    fig, axs = plt.subplots(len(cmaps_to_show), 1, figsize=(8, 2 * len(cmaps_to_show)))
+    if len(cmaps_to_show) == 1: axs = [axs]
+
     gradient = np.linspace(0, 1, 256).reshape(1, -1)
+    for i, (title, cmap) in enumerate(cmaps_to_show.items()):
+        axs[i].imshow(gradient, aspect='auto', cmap=cmap)
+        axs[i].set_title(title); axs[i].set_yticks([])
+    plt.tight_layout(); plt.suptitle("Opsin Colormap Overview", y=1.02, fontsize=16); plt.show()
 
-    axs[0].imshow(gradient, aspect='auto', cmap=DOMAIN_PROPERTY_CMAP)
-    axs[0].set_title('Domain Property (Blue -> Cyan -> Green)')
-    axs[1].imshow(gradient, aspect='auto', cmap=MOL_FUNC_PROPERTY_CMAP)
-    axs[1].set_title('Molecular Function Property (Yellow -> Red -> Purple)')
-    axs[2].imshow(gradient, aspect='auto', cmap=RMSD_CMAP)
-    axs[2].set_title('RMSD (Spectral)')
-    axs[3].imshow(gradient, aspect='auto', cmap=DISTANCE_CMAP)
-    axs[3].set_title('Distance (Default - Mol Func Reversed)')
-    axs[4].imshow(gradient, aspect='auto', cmap=DIVERGING_CMAP)
-    axs[4].set_title('Diverging Colormap')
+    plt.figure(figsize=(12, 3))
+    aa_labels_sorted = sorted(AMINO_ACID_LOGO_COLORS.keys())
+    aa_colors_list_sorted = [AMINO_ACID_LOGO_COLORS[aa] for aa in aa_labels_sorted]
+    bar_positions = np.arange(len(aa_labels_sorted))
+    plt.bar(bar_positions, np.ones(len(aa_labels_sorted)), color=aa_colors_list_sorted, tick_label=aa_labels_sorted)
+    plt.title('Amino Acid Logo Colors'); plt.xticks(rotation=45, ha="right"); plt.tight_layout(); plt.show()
 
-    helix_indices = np.array([[i] for i in range(7)]).reshape(1, -1)
-    axs[5].imshow(helix_indices, aspect='auto', cmap=get_helix_cmap())
-    axs[5].set_title('Helix Colors (New Combined Gradient)'); axs[5].set_xticks(range(7)); axs[5].set_xticklabels([f'H{i+1}' for i in range(7)])
-
-    aa_labels = list(AMINO_ACID_COLORS_COMBINED.keys())
-    aa_colors_list = [AMINO_ACID_COLORS_COMBINED[aa] for aa in aa_labels]
-    aa_indices = np.array([[i] for i in range(len(aa_labels))]).reshape(1, -1)
-    axs[6].imshow(aa_indices, aspect='auto', cmap=ListedColormap(aa_colors_list))
-    axs[6].set_title('Amino Acid Combined Colors (New Palettes)')
-    axs[6].set_xticks(range(len(aa_labels))); axs[6].set_xticklabels(aa_labels, rotation=45, ha="right")
-
-    # Demo the grayscale RMSD
-    axs[7].imshow(gradient, aspect='auto', cmap=RMSD_GRAYSCALE_CMAP)
-    axs[7].set_title('RMSD (Grayscale)')
-
-
-    for ax in axs: ax.set_yticks([])
-    plt.tight_layout()
-    plt.show()
-
-    # Example of group colors
-    example_mol_funcs = ['Rhodopsin', 'Cone_Opsin', 'NewFuncA', 'NewFuncB', 'Unknown']
-    example_domains = ['Bacteria', 'Eukaryota', 'NewDomainX', 'Unknown']
-
-    plt.figure(figsize=(12, 6))
-    plt.subplot(1, 2, 1)
-    colors1 = get_group_colors(example_mol_funcs, palette_type='mol_func')
-    for i, (group, color) in enumerate(colors1.items()): plt.bar(i, 1, color=color, label=group)
-    plt.title('Molecular Function Group Colors'); plt.legend(); plt.xticks([])
-
-    plt.subplot(1, 2, 2)
-    colors2 = get_group_colors(example_domains, palette_type='domain')
-    for i, (group, color) in enumerate(colors2.items()): plt.bar(i, 1, color=color, label=group)
-    plt.title('Domain Group Colors'); plt.legend(); plt.xticks([])
-    plt.tight_layout()
-    plt.show()
+    print("\n--- End of Demo ---")
