@@ -31,20 +31,15 @@ os.makedirs(FIGURES_OUTPUT_DIR, exist_ok=True)
 print(f"[INFO] Figures will be saved to: {FIGURES_OUTPUT_DIR}")
 
 CACHE_DIR = PROJECT_DIR / 'opsin_output' / 'cache'
-GRN_TABLES_DIR = PROJECT_DIR / 'opsin_grn_tables'  # Corrected from your snippet
+GRN_TABLES_DIR = PROJECT_DIR / 'opsin_grn_tables'
 
-# --- Import Custom Modules ---
 try:
     from src.data_processing import load_opsin_property_data
-    # visualization_functions will import color scheme components as needed
     from src.visualization_functions import (
         create_opsin_overview_plot,
-        visualize_rmsd_matrix_improved,  # This is the one used for the main RMSD heatmap
+        visualize_rmsd_matrix_improved,
         plot_distances_with_std,
         plot_helix_logo_plots
-        # create_and_visualize_similarity_tree, # Not used in the final sequence
-        # plot_similarity_tree, # Not used in the final sequence
-        # plot_rmsd_heatmap, # Not used in the final sequence
     )
     from protos.processing.grn.grn_utils import sort_grns_str, get_tm_residues
 

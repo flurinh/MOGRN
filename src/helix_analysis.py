@@ -345,7 +345,7 @@ def align_to_reference_and_annotate_helices(data_dict, output_dir='output', visu
     # Define paths for helix files
     property_dir = 'property'
     helix_ref_file = os.path.join(property_dir, 'helix_ref_CnChR2_J230_refine9.json')
-    helix_cache_file = os.path.join(property_dir, 'helices.json')
+    helix_cache_file = os.path.join(property_dir, 'helices_curated.json')
 
     # Initialize variables
     global_helix_annotations = {}
@@ -360,10 +360,6 @@ def align_to_reference_and_annotate_helices(data_dict, output_dir='output', visu
 
             # Check file size to detect potential truncation
             file_size = os.path.getsize(helix_cache_file)
-            if file_size < 100:  # Suspiciously small for a JSON with structure definitions
-                print(f"[WARNING] Helix cache file is suspiciously small ({file_size} bytes)")
-                print(f"[WARNING] This may indicate a truncated or corrupted file")
-                raise ValueError("Suspicious file size indicates potential corruption")
 
             # Try to read the first few lines to check format
             with open(helix_cache_file, 'r') as f:

@@ -120,118 +120,115 @@ def compute_all_vs_all_rmsd_improved(structures, align_to=None, subset='CA', cha
 
     for i, struct1_id in enumerate(structure_ids):
         for j, struct2_id in enumerate(structure_ids):
-            if (struct1_id != '2L6X') and (struct2_id != '2L6X'):  # this was a falsly included nmr structure
-                if i == j:
-                    rmsd_matrix[i, j] = 0.0
+
+            # Only compute for i < j (upper triangle) to avoid duplicate calculations
+            if i < j:
+                # Extract structure coordinates
+                structure1 = structures[struct1_id]
+                structure2 = structures[struct2_id]
+                # Extract appropriate dataframes
+
+                struct1_df = structure1['df'].copy()
+                struct2_df = structure2['df'].copy()
+
+                # Filter and process structures
+
+                # Filter for the specified chain
+                struct1_df = struct1_df[struct1_df['auth_chain_id'] == chain_id]
+                struct2_df = struct2_df[struct2_df['auth_chain_id'] == chain_id]
+
+                # Filter for protein
+                struct1_df = struct1_df[struct1_df['group'] == 'ATOM']
+                struct2_df = struct2_df[struct2_df['group'] == 'ATOM']
+
+                # Filter for helix residues (1-7) if requested
+                if use_helix_only:
+                    if 'helix_num' not in struct1_df.columns or 'helix_num' not in struct2_df.columns:
+                        print(f"[WARNING] helix_num column not found for {struct1_id} or {struct2_id}. Using all residues instead.")
+                    else:
+                        # Use helix-annotated residues
+
+                        # Filter for residues with helix_num 1-7
+                        struct1_helices = struct1_df[struct1_df['helix_num']>0]
+                        struct2_helices = struct2_df[struct2_df['helix_num']>0]
+
+                        # Check if we found any helix residues
+                        if len(struct1_helices) > 0 and len(struct2_helices) > 0:
+                            struct1_df = struct1_helices
+                            struct2_df = struct2_helices
+                            # Successfully filtered for helix residues
+                        else:
+                            print(f"[WARNING] No TM helix residues (1-7) found for {struct1_id} or {struct2_id}. Using all protein residues instead.")
+
+                # Filter for the specified atom subset
+                struct1_df = struct1_df[struct1_df['res_atom_name'] == 'CA']
+                struct2_df = struct2_df[struct2_df['res_atom_name'] == 'CA']
+
+                # Extract coordinates
+                struct1_coords = struct1_df[['x', 'y', 'z']].astype(float).values
+                struct2_coords = struct2_df[['x', 'y', 'z']].astype(float).values
+
+                # Prepare coordinates for alignment
+                ref_seq_ids = struct1_df['auth_seq_id'].values if 'auth_seq_id' in struct1_df.columns else list(range(len(struct1_coords)))
+                target_seq_ids = struct2_df['auth_seq_id'].values if 'auth_seq_id' in struct2_df.columns else list(range(len(struct2_coords)))
+
+                # Check if we have enough coordinates for alignment
+                if len(struct1_coords) < 3 or len(struct2_coords) < 3:
+                    print(f"[WARNING] Not enough atoms for alignment between {struct1_id} ({len(struct1_coords)} atoms) and {struct2_id} ({len(struct2_coords)} atoms).")
+                    rmsd_matrix[i, j] = np.nan
+                    rmsd_matrix[j, i] = np.nan
+                    pbar.update(1)
                     continue
 
-                # Only compute for i < j (upper triangle) to avoid duplicate calculations
-                if i < j:
-                    # Extract structure coordinates
-                    structure1 = structures[struct1_id]
-                    structure2 = structures[struct2_id]
-                    # Extract appropriate dataframes
+                # Calculate RMSD
+                try:
+                    # Attempt alignment of structures
+                    rotation, translation, best_path, rmsd = get_structure_alignment(struct1_coords, struct2_coords)
 
-                    struct1_df = structure1['df'].copy()
-                    struct2_df = structure2['df'].copy()
+                    # Extract indices from alignment path
+                    ref_indices, target_indices = best_path
 
-                    # Filter and process structures
+                    # Map indices to auth_seq_id values
+                    ref_res_ids = [ref_seq_ids[idx] for idx in ref_indices]
+                    target_res_ids = [target_seq_ids[idx] for idx in target_indices]
 
-                    # Filter for the specified chain
-                    struct1_df = struct1_df[struct1_df['auth_chain_id'] == chain_id]
-                    struct2_df = struct2_df[struct2_df['auth_chain_id'] == chain_id]
+                    # Create mapping between reference and target residue IDs
+                    residue_mapping = list(zip(ref_res_ids, target_res_ids))
 
-                    # Filter for protein
-                    struct1_df = struct1_df[struct1_df['group'] == 'ATOM']
-                    struct2_df = struct2_df[struct2_df['group'] == 'ATOM']
+                    # Store the alignment path information
+                    alignment_paths[(struct1_id, struct2_id)] = {
+                        'rotation': rotation.tolist(),
+                        'translation': translation.tolist(),
+                        'residue_mapping': residue_mapping,
+                        'rmsd': rmsd
+                    }
 
-                    # Filter for helix residues (1-7) if requested
-                    if use_helix_only:
-                        if 'helix_num' not in struct1_df.columns or 'helix_num' not in struct2_df.columns:
-                            print(f"[WARNING] helix_num column not found for {struct1_id} or {struct2_id}. Using all residues instead.")
-                        else:
-                            # Use helix-annotated residues
+                    # Also store the reverse mapping for convenience
+                    alignment_paths[(struct2_id, struct1_id)] = {
+                        'rotation': np.transpose(rotation).tolist(),  # Transpose for reverse rotation
+                        'translation': (-np.dot(np.transpose(rotation), translation)).tolist(),  # Reverse translation
+                        'residue_mapping': [(y, x) for x, y in residue_mapping],  # Reverse the mapping
+                        'rmsd': rmsd
+                    }
 
-                            # Filter for residues with helix_num 1-7
-                            struct1_helices = struct1_df[struct1_df['helix_num']>0]
-                            struct2_helices = struct2_df[struct2_df['helix_num']>0]
+                    rmsd_matrix[i, j] = rmsd
+                    # Also set the symmetric value in the lower triangle
+                    rmsd_matrix[j, i] = rmsd
+                    # RMSD calculation successful
+                except MemoryError:
+                    print(f"[ERROR] Memory error when calculating RMSD between {struct1_id} and {struct2_id}. Skipping pair.")
+                    rmsd_matrix[i, j] = np.nan
+                    rmsd_matrix[j, i] = np.nan
+                except Exception as e:
+                    print(f"[WARNING] Failed to calculate RMSD between {struct1_id} and {struct2_id}: {str(e)}")
+                    # Print more detailed error information
+                    import traceback
+                    traceback.print_exc()
+                    rmsd_matrix[i, j] = np.nan
+                    rmsd_matrix[j, i] = np.nan
 
-                            # Check if we found any helix residues
-                            if len(struct1_helices) > 0 and len(struct2_helices) > 0:
-                                struct1_df = struct1_helices
-                                struct2_df = struct2_helices
-                                # Successfully filtered for helix residues
-                            else:
-                                print(f"[WARNING] No TM helix residues (1-7) found for {struct1_id} or {struct2_id}. Using all protein residues instead.")
+            pbar.update(1)
 
-                    # Filter for the specified atom subset
-                    struct1_df = struct1_df[struct1_df['res_atom_name'] == 'CA']
-                    struct2_df = struct2_df[struct2_df['res_atom_name'] == 'CA']
-
-                    # Extract coordinates
-                    struct1_coords = struct1_df[['x', 'y', 'z']].astype(float).values
-                    struct2_coords = struct2_df[['x', 'y', 'z']].astype(float).values
-
-                    # Prepare coordinates for alignment
-                    ref_seq_ids = struct1_df['auth_seq_id'].values if 'auth_seq_id' in struct1_df.columns else list(range(len(struct1_coords)))
-                    target_seq_ids = struct2_df['auth_seq_id'].values if 'auth_seq_id' in struct2_df.columns else list(range(len(struct2_coords)))
-
-                    # Check if we have enough coordinates for alignment
-                    if len(struct1_coords) < 3 or len(struct2_coords) < 3:
-                        print(f"[WARNING] Not enough atoms for alignment between {struct1_id} ({len(struct1_coords)} atoms) and {struct2_id} ({len(struct2_coords)} atoms).")
-                        rmsd_matrix[i, j] = np.nan
-                        rmsd_matrix[j, i] = np.nan
-                        pbar.update(1)
-                        continue
-
-                    # Calculate RMSD
-                    try:
-                        # Attempt alignment of structures
-                        rotation, translation, best_path, rmsd = get_structure_alignment(struct1_coords, struct2_coords)
-
-                        # Extract indices from alignment path
-                        ref_indices, target_indices = best_path
-
-                        # Map indices to auth_seq_id values
-                        ref_res_ids = [ref_seq_ids[idx] for idx in ref_indices]
-                        target_res_ids = [target_seq_ids[idx] for idx in target_indices]
-
-                        # Create mapping between reference and target residue IDs
-                        residue_mapping = list(zip(ref_res_ids, target_res_ids))
-                        
-                        # Store the alignment path information
-                        alignment_paths[(struct1_id, struct2_id)] = {
-                            'rotation': rotation.tolist(),
-                            'translation': translation.tolist(),
-                            'residue_mapping': residue_mapping,
-                            'rmsd': rmsd
-                        }
-                        
-                        # Also store the reverse mapping for convenience
-                        alignment_paths[(struct2_id, struct1_id)] = {
-                            'rotation': np.transpose(rotation).tolist(),  # Transpose for reverse rotation
-                            'translation': (-np.dot(np.transpose(rotation), translation)).tolist(),  # Reverse translation
-                            'residue_mapping': [(y, x) for x, y in residue_mapping],  # Reverse the mapping
-                            'rmsd': rmsd
-                        }
-
-                        rmsd_matrix[i, j] = rmsd
-                        # Also set the symmetric value in the lower triangle
-                        rmsd_matrix[j, i] = rmsd
-                        # RMSD calculation successful
-                    except MemoryError:
-                        print(f"[ERROR] Memory error when calculating RMSD between {struct1_id} and {struct2_id}. Skipping pair.")
-                        rmsd_matrix[i, j] = np.nan
-                        rmsd_matrix[j, i] = np.nan
-                    except Exception as e:
-                        print(f"[WARNING] Failed to calculate RMSD between {struct1_id} and {struct2_id}: {str(e)}")
-                        # Print more detailed error information
-                        import traceback
-                        traceback.print_exc()
-                        rmsd_matrix[i, j] = np.nan
-                        rmsd_matrix[j, i] = np.nan
-
-                pbar.update(1)
     # Close the progress bar
     pbar.close()
     
