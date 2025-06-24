@@ -1,0 +1,22 @@
+[2025-06-24 10:13] [MODIFY] /mnt/c/Users/hidbe/PycharmProjects/MOGRN/CLAUDE.md - Updated project-specific information for MOGRN framework
+[2025-06-24 10:14] [CREATE] /mnt/c/Users/hidbe/PycharmProjects/MOGRN/claude/execution.txt - Created system setup and execution procedures for MOGRN
+[2025-06-24 10:16] [CREATE] /mnt/c/Users/hidbe/PycharmProjects/MOGRN/claude/content.txt - Created project structure documentation
+[2025-06-24 10:16] [MODIFY] /mnt/c/Users/hidbe/PycharmProjects/MOGRN/claude/todo.txt - Updated with comprehensive project task tree
+[2025-06-24 10:22] [CREATE] /mnt/c/Users/hidbe/PycharmProjects/MOGRN/claude/csv_tables.txt - Created CSV handling rules and best practices
+[2025-06-24 10:24] [CREATE] /mnt/c/Users/hidbe/PycharmProjects/MOGRN/claude/csv_helper.py - Created CSV helper script for efficient operations
+[2025-06-24 10:26] [MODIFY] /mnt/c/Users/hidbe/PycharmProjects/MOGRN/claude/content.txt - Updated to include csv_tables.txt and csv_helper.py
+[2025-06-24 10:35] [MODIFY] /mnt/c/Users/hidbe/PycharmProjects/MOGRN/claude/csv_tables.txt - Updated with context-first approach and index-based operations
+[2025-06-24 10:35] [MODIFY] /mnt/c/Users/hidbe/PycharmProjects/MOGRN/claude/csv_helper.py - Enhanced with index-based operations and context-aware methods
+[2025-06-24 10:38] [MODIFY] /mnt/c/Users/hidbe/PycharmProjects/MOGRN/CLAUDE.md - Added CSV tables instructions to mandatory startup procedure
+[2025-06-24 10:52] [MODIFY] /mnt/c/Users/hidbe/PycharmProjects/MOGRN/claude/csv_helper.py - Added column-frequencies command for analyzing value distributions in specified columns
+[2025-06-24 11:04] [CREATE] /mnt/c/Users/hidbe/PycharmProjects/MOGRN/analyze_grn_by_subgroups.py - Created script to analyze GRN conservation patterns by protein subgroups
+[2025-06-24 11:11] [CREATE] /mnt/c/Users/hidbe/PycharmProjects/MOGRN/analyze_50_neighborhoods.py - Created script to analyze conservation patterns around .50 positions (±4 residues)
+[2025-06-24 11:11] [CREATE] /mnt/c/Users/hidbe/PycharmProjects/MOGRN/analyze_neighborhood_patterns.py - Created script for detailed pattern analysis in neighborhoods
+[2025-06-24 11:17] [CREATE] /mnt/c/Users/hidbe/PycharmProjects/MOGRN/extract_helix_motifs.py - Created script to extract sequence motifs around .50 positions for each helix
+[2025-06-24 11:17] [CREATE] /mnt/c/Users/hidbe/PycharmProjects/MOGRN/summarize_helix_patterns.py - Created comprehensive helix pattern summary script
+[2025-06-24 11:22] [MODIFY] /mnt/c/Users/hidbe/PycharmProjects/MOGRN/analyze_50_neighborhoods.py - Updated to create per-helix conservation heatmaps instead of overall heatmap
+[2025-06-24 11:25] [CREATE] /mnt/c/Users/hidbe/PycharmProjects/MOGRN/PRELIMINARY_RESULTS.md - Created detailed preliminary results document for GRN analysis of microbial opsins
+[2025-06-24 11:33] [CREATE] /mnt/c/Users/hidbe/PycharmProjects/MOGRN/analyze_grn_conservation.py - Created comprehensive GRN conservation analysis script combining all analysis functions
+[2025-06-24 11:33] [DEPRECATE] Multiple analysis scripts marked as deprecated and replaced by unified script
+[2025-06-24 11:45] [CREATE] /mnt/c/Users/hidbe/PycharmProjects/MOGRN/check_helix_alignment.py - Created script to check GRN-helix boundary alignment
+[2025-06-24 11:45] [CREATE] /mnt/c/Users/hidbe/PycharmProjects/MOGRN/analyze_all_helix_alignments.py - Created comprehensive script to analyze helix boundary misalignments across all proteins

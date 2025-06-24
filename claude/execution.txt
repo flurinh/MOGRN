@@ -1,0 +1,194 @@
+# MOGRN EXECUTION & SETUP PROCEDURES
+
+## =� SESSION INITIALIZATION
+
+### 1. Environment Setup
+```bash
+# conda activate mogrn
+
+# Verify Protos is installed
+python -c "import protos; print('Protos version:', protos.__version__)"
+
+# Check required directories exist
+ls -la property/
+ls -la structures/
+```
+
+### 2. Data Path Verification
+```bash
+# Check property files
+ls -la property/mo_exp.csv
+ls -la property/helices.json
+
+# Check structure directories
+ls -la structures/hideaki_exp/
+ls -la structures/hideaki_pred/
+ls -la structures/mo_pred/
+
+# Count available structures
+find structures/ -name "*.cif" | wc -l
+```
+
+### 3. Protos Path Configuration
+**CRITICAL**: Always explicitly set Protos paths to avoid resolution bugs:
+```python
+import os
+from pathlib import Path
+from protos.io.paths.path_config import ProtosPaths
+
+# Set environment variables
+data_dir = Path("/mnt/c/Users/hidbe/PycharmProjects/MOGRN")
+os.environ["PROTOS_DATA_ROOT"] = str(data_dir.absolute())
+os.environ["PROTOS_REF_DATA_ROOT"] = str(data_dir.absolute())
+
+# Initialize paths
+paths = ProtosPaths(
+    user_data_root=str(data_dir.absolute()),
+    ref_data_root=str(data_dir.absolute()),
+    create_dirs=True
+)
+```
+
+## =� STANDARD WORKFLOW EXECUTION
+
+### Step 1: Data Preparation
+```bash
+python prepare_data_fixed.py
+```
+Expected output:
+- Creates necessary directory structure
+- Initializes ProtosPaths system
+- Sets up CifBaseProcessor
+- Validates dataset accessibility
+- Creates cache directories
+
+### Step 2: YAML Configuration
+```bash
+python prepare_yaml.py
+```
+Expected output:
+- Processes property/mo_exp.csv
+- Creates YAML files for each protein
+- Validates sequences
+- Handles multi-retinal proteins
+
+### Step 3: Main Analysis
+```bash
+python opsin_analysis_workflow.py
+```
+Expected output:
+- Loads structures from cache or processes new
+- Calculates RMSD matrices
+- Assigns transmembrane helices
+- Performs GRN assignment
+- Saves results to output/
+
+### Step 4: Visualization
+```bash
+python plot.py
+```
+Expected output:
+- Generates RMSD heatmaps
+- Creates similarity trees
+- Produces conservation plots
+- Saves figures to figures/
+
+## =' COMMON OPERATIONS
+
+### Check Cache Status
+```bash
+# List cached structure files
+ls -la cached_structures/*.pkl
+
+# Check cache size
+du -sh cached_structures/
+```
+
+### Debug Structure Loading
+```python
+from src.data_processing import load_experimental_dataset
+cp = load_experimental_dataset('mo_exp')
+print(f"Loaded {len(cp.pdb_ids)} structures")
+```
+
+### Test Specific Components
+```bash
+# Test imports
+python src/test_imports.py
+
+# Test Protos integration
+python src/test_protos.py
+
+# Debug cache functionality
+python debug_cache.py
+```
+
+## � TROUBLESHOOTING
+
+### Path Resolution Issues
+If encountering "Path not found" errors:
+1. Always use absolute paths
+2. Set environment variables explicitly
+3. Check ProtosPaths initialization
+
+### Memory Issues
+For large datasets:
+1. Use cached results when possible
+2. Process structures in batches
+3. Monitor memory with: `watch -n 1 free -h`
+
+### Missing Dependencies
+```bash
+# Reinstall Protos
+cd protos && pip install -e . && cd ..
+
+# Update all dependencies
+pip install -r requirements.txt --upgrade
+```
+
+## =� OUTPUT VERIFICATION
+
+### Check Analysis Results
+```bash
+# List output files
+ls -la output/
+
+# Verify key outputs exist
+ls -la output/rmsd_matrix.csv
+ls -la output/msa_table_grn.csv
+ls -la output/protein_summary.csv
+
+# Check visualization outputs
+ls -la figures/*.png
+```
+
+### Validate GRN Assignment
+```python
+import pandas as pd
+msa_df = pd.read_csv('output/msa_table_grn.csv')
+print(f"MSA contains {len(msa_df)} structures")
+print(f"GRN positions: {len(msa_df.columns) - 1}")
+```
+
+## = WORKFLOW VARIATIONS
+
+### Run Without Cache
+```bash
+python opsin_analysis_workflow.py --no-cache
+```
+
+### Custom Output Directory
+```bash
+python opsin_analysis_workflow.py --output-dir results_2024
+python plot.py --input-dir results_2024 --output-dir figures_2024
+```
+
+### Process Subset of Structures
+Edit workflow to filter PDB IDs before processing
+
+## =� SESSION NOTES
+
+- Always check /claude/logs.txt for recent file modifications
+- Update /claude/todo.txt when completing workflow steps
+- Monitor memory usage for large datasets
+- Verify Protos paths are correctly initialized each session

@@ -1,0 +1,411 @@
+# CSV HANDLING RULES & BEST PRACTICES
+
+## 🎯 PRIMARY GOALS
+1. **UNDERSTAND TABLE CONTEXT FIRST** - What does this table represent?
+2. **MINIMIZE TOKEN USAGE** - Read only what's necessary
+3. **ENABLE PRECISE ACCESS** - Use indices and column names for targeted retrieval
+4. **REQUIRES THE PYTHON ENV TO BE ACTIVATED**
+
+## 📊 TABLE CONTEXT IN MOGRN PROJECT
+
+### Known Table Types:
+1. **RMSD Matrix** (`rmsd_matrix.csv`)
+   - Structure: PDB IDs as both row and column indices
+   - Content: RMSD values between structure pairs
+   - Usage: Structure similarity analysis
+
+2. **MSA with GRN** (`msa_table_grn.csv`)
+   - Structure: PDB IDs as rows, GRN positions as columns
+   - Content: Amino acid residues at each GRN position
+   - Usage: Multiple sequence alignment analysis
+
+3. **Distance Tables** (`ca_distance_table_grn.csv`, `distance_table_grn.csv`)
+   - Structure: PDB IDs as rows, GRN positions as columns
+   - Content: Distances from residues to retinal
+   - Usage: Proximity analysis
+
+4. **Protein Summary** (`protein_summary.csv`)
+   - Structure: PDB IDs as rows, various metrics as columns
+   - Content: Summary statistics per protein
+   - Usage: Overview and filtering
+
+5. **Property Data** (`mo_exp.csv`)
+   - Structure: Protein IDs as rows, properties as columns
+   - Content: Experimental properties and metadata
+   - Usage: Linking structures to experimental data
+
+## 📋 CONTEXT-FIRST WORKFLOW
+
+### 1. UNDERSTAND TABLE STRUCTURE (Always do first)
+```python
+# Step 1: Get table metadata
+python /claude/csv_helper.py schema file.csv
+
+# Returns:
+# - Table dimensions (rows x columns)
+# - Column names and types
+# - Index column (if any)
+# - Sample values for context
+# - Memory footprint
+
+# Step 2: Understand indices
+python /claude/csv_helper.py indices file.csv --sample 20
+
+# Returns:
+# - Index values (first 20)
+# - Index type (numeric, string, etc.)
+# - Whether index is unique
+```
+
+### 2. INDEX-BASED ACCESS PATTERNS
+
+#### A. Get Row by Index Value
+```python
+# Get single row as dictionary
+python /claude/csv_helper.py get-row file.csv --index "PDB_001"
+
+# Returns: {'col1': 'value1', 'col2': 'value2', ...}
+
+# Get multiple rows by indices
+python /claude/csv_helper.py get-rows file.csv --indices "PDB_001,PDB_002,PDB_003"
+
+# Get row by numeric position
+python /claude/csv_helper.py get-row file.csv --position 42
+```
+
+#### B. Get Cell by Index and Column
+```python
+# Get specific cell value
+python /claude/csv_helper.py get-cell file.csv --index "PDB_001" --column "rmsd_value"
+
+# Get multiple cells
+python /claude/csv_helper.py get-cells file.csv --indices "PDB_001,PDB_002" --columns "col1,col2"
+```
+
+#### C. Search Indices
+```python
+# Find rows where index matches pattern
+python /claude/csv_helper.py search-index file.csv --pattern "PDB_.*exp"
+
+# Find rows where index is in range (for numeric indices)
+python /claude/csv_helper.py search-index file.csv --min 100 --max 200
+```
+
+### 3. CONTEXT-AWARE READING
+
+#### A. For RMSD Matrices
+```python
+# Get similarity between specific structures
+python /claude/csv_helper.py get-cell rmsd_matrix.csv --index "1ABC" --column "2XYZ"
+
+# Find most similar structures to a target
+python /claude/csv_helper.py get-row rmsd_matrix.csv --index "1ABC" --sort-values --limit 10
+```
+
+#### B. For GRN Tables
+```python
+# Get residue at specific GRN position for a structure
+python /claude/csv_helper.py get-cell msa_table_grn.csv --index "1ABC" --column "3.50"
+
+# Get all residues for a specific structure
+python /claude/csv_helper.py get-row msa_table_grn.csv --index "1ABC" --as-dict
+```
+
+#### C. For Distance Tables
+```python
+# Get distances for specific structure
+python /claude/csv_helper.py get-row distance_table_grn.csv --index "1ABC" --numeric-only
+
+# Find residues within distance threshold
+python /claude/csv_helper.py filter-row distance_table_grn.csv --index "1ABC" --max-value 5.0
+```
+
+### 4. TABLE UNDERSTANDING WORKFLOW
+
+```mermaid
+graph TD
+    A[New CSV File] --> B[Get Schema]
+    B --> C{Has Index Column?}
+    C -->|Yes| D[Analyze Index]
+    C -->|No| E[Use Row Numbers]
+    D --> F[Sample Rows]
+    E --> F
+    F --> G[Understand Context]
+    G --> H{Task Type?}
+    H -->|Lookup| I[Index-based Access]
+    H -->|Analysis| J[Statistical Sampling]
+    H -->|Comparison| K[Multi-row Access]
+```
+
+### 5. BEST PRACTICES FOR TABLE CONTEXT
+
+1. **Always Start with Schema**
+   ```python
+   # First command for any new table
+   python /claude/csv_helper.py schema output/rmsd_matrix.csv
+   ```
+
+2. **Document Table Purpose**
+   - What does each row represent?
+   - What does each column measure?
+   - What are typical values?
+   - How is this table used in analysis?
+
+3. **Use Appropriate Access Pattern**
+   - RMSD matrices: Cell-by-cell comparison
+   - MSA tables: Row-wise sequence analysis
+   - Distance tables: Column-wise proximity analysis
+   - Summary tables: Multi-column filtering
+
+### 6. MEMORY-EFFICIENT OPERATIONS
+```python
+# Get column stats efficiently
+python /claude/csv_helper.py stats file.csv --columns "numeric_col1,numeric_col2"
+
+# Sample-based analysis
+df_sample = pd.read_csv('file.csv', nrows=1000)
+print(df_sample.describe())
+print(df_sample.dtypes)
+```
+
+#### B. Pattern Detection
+```python
+# Find missing values
+python /claude/csv_helper.py missing file.csv --sample 1000
+
+# Detect duplicates in key columns
+python /claude/csv_helper.py duplicates file.csv --columns "id,email"
+
+# Find outliers
+python /claude/csv_helper.py outliers file.csv --column "price" --method "iqr"
+```
+
+### 4. ISSUE DETECTION & FIXING
+
+#### A. Common Issues to Check
+1. **Missing Values**
+   - Count per column
+   - Patterns (always missing together?)
+   - Fill strategies
+
+2. **Data Type Mismatches**
+   - Numbers stored as strings
+   - Dates in various formats
+   - Boolean inconsistencies
+
+3. **Duplicates**
+   - Full row duplicates
+   - Key column duplicates
+   - Near-duplicates
+
+4. **Outliers**
+   - Statistical outliers
+   - Invalid values
+   - Data entry errors
+
+#### B. Fix Strategies
+```python
+# Fix in chunks to save memory
+python /claude/csv_helper.py fix file.csv output.csv --fix-missing --fix-types --remove-duplicates
+
+# Manual chunk processing
+def process_chunk(chunk):
+    # Fix missing values
+    chunk.fillna({'col1': 0, 'col2': 'Unknown'}, inplace=True)
+    
+    # Fix data types
+    chunk['price'] = pd.to_numeric(chunk['price'], errors='coerce')
+    chunk['date'] = pd.to_datetime(chunk['date'], errors='coerce')
+    
+    # Remove duplicates
+    chunk.drop_duplicates(subset=['id'], inplace=True)
+    
+    return chunk
+
+# Process file in chunks
+pd.read_csv('input.csv', chunksize=10000).pipe(
+    lambda chunks: pd.concat(process_chunk(chunk) for chunk in chunks)
+).to_csv('output.csv', index=False)
+```
+
+### 5. CSV OPERATION WORKFLOW
+
+```mermaid
+graph TD
+    A[Inspect File] --> B{File Size?}
+    B -->|< 1MB| C[Read Normally]
+    B -->|> 1MB| D[Use Sampling]
+    D --> E[Read Headers]
+    E --> F[Sample Rows]
+    F --> G{Task Type?}
+    G -->|Analysis| H[Statistical Sampling]
+    G -->|Cleaning| I[Chunk Processing]
+    G -->|Search| J[Filtered Reading]
+    H --> K[Generate Report]
+    I --> L[Write Fixed File]
+    J --> M[Extract Results]
+```
+
+### 6. MEMORY-EFFICIENT OPERATIONS
+
+#### A. Never Do This:
+```python
+# BAD: Loads entire file
+df = pd.read_csv('huge_file.csv')
+result = df[df['column'] == 'value']
+
+# BAD: Multiple full reads
+df1 = pd.read_csv('file.csv')
+df2 = pd.read_csv('file.csv')
+```
+
+#### B. Always Do This:
+```python
+# GOOD: Read only what's needed
+df = pd.read_csv('file.csv', usecols=['needed_col1', 'needed_col2'])
+
+# GOOD: Process in chunks
+results = []
+for chunk in pd.read_csv('huge_file.csv', chunksize=10000):
+    result = chunk[chunk['column'] == 'value']
+    results.append(result)
+final_result = pd.concat(results)
+
+# GOOD: Use iterators
+with pd.read_csv('file.csv', chunksize=1000) as reader:
+    for chunk in reader:
+        process(chunk)
+```
+
+### 7. QUICK ANALYSIS COMMANDS
+
+```bash
+# Count unique values in a column
+cut -d',' -f2 file.csv | sort | uniq -c | sort -nr | head -20
+
+# Get column value distribution
+awk -F',' '{print $3}' file.csv | sort | uniq -c | sort -nr
+
+# Find rows with missing values
+awk -F',' 'NF < expected_columns' file.csv
+
+# Quick numeric column stats
+awk -F',' '{sum+=$2; count++} END {print "avg:", sum/count}' file.csv
+```
+
+### 8. CSV HELPER COMMAND REFERENCE
+
+The CSV helper script (`/claude/csv_helper.py`) provides these commands:
+
+#### Schema & Structure Commands
+```bash
+# Get table schema and context
+python /claude/csv_helper.py schema file.csv
+
+# List indices with samples
+python /claude/csv_helper.py indices file.csv [--sample N]
+
+# Quick peek at structure
+python /claude/csv_helper.py peek file.csv [--rows N]
+```
+
+#### Index-Based Access Commands
+```bash
+# Get single row by index (returns as dictionary)
+python /claude/csv_helper.py get-row file.csv --index "row_id"
+python /claude/csv_helper.py get-row file.csv --position N
+
+# Get multiple rows by indices
+python /claude/csv_helper.py get-rows file.csv --indices "id1,id2,id3"
+
+# Get specific cell value
+python /claude/csv_helper.py get-cell file.csv --index "row_id" --column "col_name"
+
+# Get multiple cells
+python /claude/csv_helper.py get-cells file.csv --indices "id1,id2" --columns "col1,col2"
+
+# Search indices
+python /claude/csv_helper.py search-index file.csv --pattern "regex"
+python /claude/csv_helper.py search-index file.csv --min N --max M
+```
+
+#### Analysis Commands
+```bash
+# Get statistics
+python /claude/csv_helper.py stats file.csv [--columns "col1,col2"] [--sample N]
+
+# Find missing values
+python /claude/csv_helper.py missing file.csv [--sample N]
+
+# Count duplicates
+python /claude/csv_helper.py duplicates file.csv [--columns "col1,col2"]
+
+# Find outliers
+python /claude/csv_helper.py outliers file.csv --column "col" [--method "iqr|zscore"]
+```
+
+#### Data Manipulation Commands
+```bash
+# Filter data
+python /claude/csv_helper.py filter file.csv --column "col" --value "val" [--output out.csv]
+
+# Filter row by values
+python /claude/csv_helper.py filter-row file.csv --index "row_id" --max-value N
+
+# Fix common issues
+python /claude/csv_helper.py fix file.csv output.csv [--fix-missing] [--fix-types] [--remove-duplicates]
+```
+
+#### Reporting Commands
+```bash
+# Generate comprehensive report
+python /claude/csv_helper.py report file.csv [--output report.txt] [--sample N]
+```
+
+### 9. DECISION TREE FOR CSV OPERATIONS
+
+1. **File Size Check** → If > 10MB, always use sampling/chunking
+2. **Task Type** → Analysis? Use sampling. Transformation? Use chunks.
+3. **Column Count** → If > 20 columns, always specify needed columns
+4. **Row Count** → If > 100k rows, never load all at once
+5. **Memory Available** → Monitor with `free -h` during operations
+
+### 10. ERROR HANDLING
+
+Always wrap CSV operations with proper error handling:
+
+```python
+try:
+    # Attempt operation
+    df = pd.read_csv('file.csv', nrows=1000)
+except pd.errors.EmptyDataError:
+    print("Empty CSV file")
+except pd.errors.ParserError as e:
+    print(f"Parse error: {e}")
+    # Try with different parameters
+    df = pd.read_csv('file.csv', nrows=1000, error_bad_lines=False)
+except MemoryError:
+    print("Out of memory - use chunking")
+    # Fall back to chunk processing
+```
+
+## 📝 REPORTING TEMPLATE
+
+When analyzing a CSV, always report:
+1. File size and dimensions
+2. Column names and types
+3. Missing value summary
+4. Duplicate count
+5. Basic statistics for numeric columns
+6. Issues found
+7. Recommendations for fixes
+
+## 🚨 CRITICAL REMINDERS
+
+1. **NEVER** read entire large files into context
+2. **ALWAYS** check file size first
+3. **USE** sampling for analysis tasks
+4. **PROCESS** in chunks for transformations
+5. **SPECIFY** only needed columns
+6. **MONITOR** memory usage
+7. **LOG** operations to `/claude/logs.txt`
