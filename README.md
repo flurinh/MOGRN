@@ -24,7 +24,7 @@ Microbial opsins contain seven transmembrane helices with a retinal chromophore.
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/MOGRN.git
+git clone https://github.com/flurinh/MOGRN.git
 cd MOGRN
 
 # Create conda environment (recommended)
@@ -118,21 +118,55 @@ python analyze_motifs.py
 
 ```
 MOGRN/
-├── output/                          # Core analysis results
-│   ├── rmsd_matrix.csv             # Pairwise structural similarities
-│   ├── msa_table_grn.csv           # Aligned sequences with GRN
-│   ├── distance_table_grn.csv      # Residue-retinal distances
-│   └── protein_summary.csv         # Structure quality metrics
-├── opsin_output/
-│   ├── grn_analysis/               # GRN conservation analysis
-│   │   ├── conservation/           # Conservation data files
-│   │   ├── figures/                # Multi-panel visualizations
-│   │   └── reports/                # Detailed text reports
-│   └── motifs/                     # Motif analysis results
-│       ├── single_position_analysis/
-│       ├── literature_motifs/
-│       └── correlation_analysis/
-└── figures/                        # Standard visualization plots
+└── opsin_output/                    # All analysis outputs
+    ├── rmsd_matrix.csv             # Pairwise structural similarities
+    ├── curated_msa.csv             # Curated multiple sequence alignment
+    ├── analysis_summary.json       # Summary of analysis parameters
+    ├── hideaki_errors.csv          # Error analysis for Hideaki dataset
+    ├── mo_exp_errors.csv           # Error analysis for experimental structures
+    ├── cache/                      # Cached intermediate results
+    │   ├── processed_structures_*.pkl
+    │   ├── helix_annotations_*.pkl
+    │   └── grn_assignment_*.pkl
+    ├── global_reference_grn/       # Global GRN alignment results
+    │   ├── msa_table_grn.csv      # Full MSA with GRN positions
+    │   ├── ca_msa_table_grn.csv   # CA-only MSA
+    │   ├── distance_table_grn.csv # Sidechain-retinal distances
+    │   └── ca_distance_table_grn.csv # CA-retinal distances
+    ├── tree_based_grn/             # Tree-based GRN alignment
+    │   └── [same files as global_reference_grn]
+    ├── grn_analysis/               # GRN conservation analysis
+    │   ├── comprehensive_analysis_results.json
+    │   ├── conservation/           # Conservation data by group
+    │   │   ├── conservation_by_function.json
+    │   │   ├── conservation_by_domain.json
+    │   │   ├── motifs_by_function.json
+    │   │   └── neighborhood_by_*.json
+    │   ├── figures/                # Analysis visualizations
+    │   │   ├── grn_conservation_comprehensive_summary.png
+    │   │   ├── functional_discrimination_heatmap.png
+    │   │   ├── coevolution_patterns.png
+    │   │   └── *_conservation_heatmap.png
+    │   └── reports/                # Detailed text reports
+    │       ├── conservation_summary_report.txt
+    │       └── grn_pattern_interpretation.txt
+    ├── motifs/                     # Motif analysis results
+    │   ├── comprehensive_motif_report.md
+    │   ├── extended_motif_table.csv
+    │   ├── literature_motifs.csv
+    │   ├── single_position_discriminators.csv
+    │   ├── correlations_*residue.csv
+    │   ├── cross_function_patterns.csv
+    │   └── comprehensive_motif_analysis.png
+    └── paper_figures/              # Publication-ready figures
+        ├── 01_opsin_overview.png
+        ├── 02_rmsd_clustermap.png
+        ├── 03_all_atom_distance_std.png
+        ├── 04_ca_atom_distance_std.png
+        ├── 05_helix_logos_x50.png
+        ├── 06_property_analysis_natural_domains.png
+        ├── 07_prediction_contribution_bars.png
+        └── interactive_grn_alignment.html
 ```
 
 ## Key Results and Interpretation
