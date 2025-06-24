@@ -70,7 +70,7 @@ def load_processed_structures():
 
 def load_grn_table():
     """Load and parse the GRN table"""
-    grn_file = "opsin_output/opsin_grn_tables/residue_table_grn.csv"
+    grn_file = "opsin_output/tree_based_grn/msa_table_grn.csv"
     
     print(f"Reading GRN table from: {grn_file}")
     grn_df = pd.read_csv(grn_file, index_col=0)

@@ -164,13 +164,13 @@ MOGRN/
 ### Main Workflow
 ```bash
 # Step 1: Initialize data infrastructure
-python prepare_data_fixed.py
+python prepare_data.py
 
 # Step 2: Create YAML configurations for sequences
 python prepare_yaml.py
 
 # Step 3: Run complete analysis pipeline
-python opsin_analysis_workflow.py
+python opsin_analysis_workflow_deprecated.py
 
 # Step 4: Generate visualizations
 python plot.py
@@ -180,10 +180,10 @@ python plot.py
 
 ```bash
 # Run analysis with custom output directory
-python opsin_analysis_workflow.py --output-dir custom_output
+python opsin_analysis_workflow_deprecated.py --output-dir custom_output
 
 # Run without cache
-python opsin_analysis_workflow.py --no-cache
+python opsin_analysis_workflow_deprecated.py --no-cache
 
 # Generate plots with custom directories
 python plot.py --input-dir custom_output --output-dir custom_figures

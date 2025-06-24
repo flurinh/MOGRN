@@ -26,122 +26,33 @@ Atomic tasks (no breakdown needed):
 
 <!-- PROJECT TASKS -->
 
-<task id="project-setup" status="completed" priority="high">
-  <description>Initial project setup and documentation</description>
+<task id="property-mapping" status="completed" priority="high">
+  <description>Fix and unify property-to-structure mapping across the project</description>
   <subtasks>
-    <task id="project-setup.1" status="completed" priority="high">
-      <description>Review project structure and understand functionality</description>
+    <task id="property-mapping.1" status="completed" priority="high">
+      <description>Create unified property mapping module to handle all 4 dataset types</description>
     </task>
-    <task id="project-setup.2" status="completed" priority="high">
-      <description>Update CLAUDE.md with project-specific information</description>
+    <task id="property-mapping.2" status="completed" priority="high">
+      <description>Update plot.py to use unified property mapper</description>
     </task>
-    <task id="project-setup.3" status="completed" priority="high">
-      <description>Create claude/ directory files (execution.txt, content.txt, todo.txt)</description>
+    <task id="property-mapping.3" status="completed" priority="high">
+      <description>Create property distribution visualizations</description>
     </task>
   </subtasks>
 </task>
 
-<task id="workflow-optimization" status="pending" priority="medium">
-  <description>Optimize and enhance the analysis workflow</description>
-  <subtasks>
-    <task id="workflow-optimization.1" status="pending" priority="medium">
-      <description>Review and optimize caching mechanisms</description>
-    </task>
-    <task id="workflow-optimization.2" status="pending" priority="medium">
-      <description>Add progress bars and better logging</description>
-    </task>
-    <task id="workflow-optimization.3" status="pending" priority="low">
-      <description>Implement parallel processing where applicable</description>
-    </task>
-  </subtasks>
+<task id="workflow-integration" status="pending" priority="medium">
+  <description>Integrate unified property mapper into opsin_analysis_workflow.py</description>
 </task>
 
-<task id="testing" status="pending" priority="high">
-  <description>Improve test coverage and reliability</description>
+<task id="documentation" status="pending" priority="low">
+  <description>Update documentation to reflect new property mapping system</description>
   <subtasks>
-    <task id="testing.1" status="pending" priority="high">
-      <description>Create unit tests for core modules in src/</description>
+    <task id="doc.1" status="pending" priority="low">
+      <description>Update PROPERTY_MAPPING_PATTERNS.md with final implementation details</description>
     </task>
-    <task id="testing.2" status="pending" priority="medium">
-      <description>Add integration tests for complete workflow</description>
-    </task>
-    <task id="testing.3" status="pending" priority="medium">
-      <description>Set up continuous integration</description>
-    </task>
-  </subtasks>
-</task>
-
-<task id="visualization-enhancement" status="pending" priority="medium">
-  <description>Enhance visualization capabilities</description>
-  <subtasks>
-    <task id="visualization-enhancement.1" status="pending" priority="medium">
-      <description>Add interactive plots using plotly</description>
-    </task>
-    <task id="visualization-enhancement.2" status="pending" priority="low">
-      <description>Create 3D structure visualization tools</description>
-    </task>
-    <task id="visualization-enhancement.3" status="pending" priority="medium">
-      <description>Improve animation generation pipeline</description>
-    </task>
-  </subtasks>
-</task>
-
-<task id="documentation" status="pending" priority="medium">
-  <description>Improve project documentation</description>
-  <subtasks>
-    <task id="documentation.1" status="pending" priority="high">
-      <description>Create API documentation for src/ modules</description>
-    </task>
-    <task id="documentation.2" status="pending" priority="medium">
-      <description>Add example notebooks demonstrating usage</description>
-    </task>
-    <task id="documentation.3" status="pending" priority="low">
-      <description>Create video tutorials for workflow steps</description>
-    </task>
-  </subtasks>
-</task>
-
-<task id="protos-integration" status="pending" priority="high">
-  <description>Improve Protos framework integration</description>
-  <subtasks>
-    <task id="protos-integration.1" status="pending" priority="high">
-      <description>Fix path resolution issues</description>
-    </task>
-    <task id="protos-integration.2" status="pending" priority="medium">
-      <description>Update to latest Protos version</description>
-    </task>
-    <task id="protos-integration.3" status="pending" priority="low">
-      <description>Contribute improvements back to Protos</description>
-    </task>
-  </subtasks>
-</task>
-
-<task id="performance" status="pending" priority="medium">
-  <description>Optimize performance for large datasets</description>
-  <subtasks>
-    <task id="performance.1" status="pending" priority="high">
-      <description>Profile memory usage and optimize</description>
-    </task>
-    <task id="performance.2" status="pending" priority="medium">
-      <description>Implement batch processing for large structure sets</description>
-    </task>
-    <task id="performance.3" status="pending" priority="low">
-      <description>Add GPU acceleration for applicable operations</description>
-    </task>
-  </subtasks>
-</task>
-
-<task id="feature-development" status="pending" priority="low">
-  <description>Develop new analysis features</description>
-  <subtasks>
-    <task id="feature-development.1" status="pending" priority="medium">
-      <description>Add support for additional structure file formats</description>
-    </task>
-    <task id="feature-development.2" status="pending" priority="low">
-      <description>Implement machine learning predictions</description>
-    </task>
-    <task id="feature-development.3" status="pending" priority="low">
-      <description>Create web interface for analysis</description>
+    <task id="doc.2" status="pending" priority="low">
+      <description>Update CLAUDE.md with new visualization commands</description>
     </task>
   </subtasks>
 </task>

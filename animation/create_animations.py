@@ -205,5 +205,5 @@ if __name__ == "__main__":
             print("\n❌ Animation failed. Check error messages above.")
             print("\nCommon issues:")
             print("  - ffmpeg not installed")
-            print("  - Missing data files (run opsin_analysis_workflow.py first)")
+            print("  - Missing data files (run opsin_analysis_workflow_deprecated.py first)")
             print("  - Insufficient disk space for frames")

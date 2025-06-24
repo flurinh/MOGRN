@@ -2,15 +2,23 @@
 
 ## Project Overview
 
-MOGRN is a comprehensive framework for analyzing, comparing, and visualizing experimental and predicted microbial opsin structures using Generic Residue Numbering (GRN). Microbial opsins are light-sensitive proteins involved in various sensing functions, and this framework provides tools for standardized structural analysis.
+MOGRN is a comprehensive framework for analyzing, comparing, and visualizing experimental and predicted microbial opsin structures using Generic Residue Numbering (GRN). Microbial opsins are light-sensitive proteins that function as ion pumps, channels, and sensors across diverse organisms. This framework provides advanced tools for understanding their structural conservation, functional determinants, and evolutionary relationships.
 
-The analysis pipeline integrates multiple components:
-- Structure data loading and preprocessing from various sources
-- Structural alignment and error calculation
-- Transmembrane helix identification and annotation
-- Comparative analysis across multiple structures
-- Generic Residue Number assignment for standardized comparison
-- Comprehensive visualization tools for structural insights
+### Key Features
+
+- **Generic Residue Numbering (GRN)**: Standardized numbering system enabling consistent comparison across diverse opsin structures
+- **Conservation Analysis**: Identifies functionally critical positions and domain-specific patterns
+- **Motif Detection**: Validates literature-known motifs and discovers novel functional patterns
+- **Functional Discrimination**: Distinguishes structural features that determine pump vs channel function
+- **Co-evolution Analysis**: Detects correlated residue changes indicating functional coupling
+
+### Scientific Background
+
+Microbial opsins contain seven transmembrane helices with a retinal chromophore. Key positions (labeled with .50 suffix in GRN) serve as structural anchors:
+- **Position 3.50**: Critical functional switch (T in pumps → C in channels)
+- **Position 6.50**: Conserved tryptophan forming the retinal binding pocket
+- **Position 7.50**: Lysine forming Schiff base with retinal
+- Other .50 positions show function-specific conservation patterns
 
 ## Installation
 
@@ -19,13 +27,17 @@ The analysis pipeline integrates multiple components:
 git clone https://github.com/yourusername/MOGRN.git
 cd MOGRN
 
+# Create conda environment (recommended)
+conda create -n mogrn python=3.10
+conda activate mogrn
+
 # Install dependencies
 pip install -r requirements.txt
 ```
 
 ### Installing Protos Framework (Required)
 
-MOGRN depends on the Protos framework for protein structure analysis. To install it:
+MOGRN depends on the Protos framework for protein structure analysis:
 
 ```bash
 # Clone the Protos repository
@@ -41,152 +53,166 @@ cd ..
 
 ## Required Data Folders (Not Included)
 
-**IMPORTANT**: The repository does not include data files. You must create and populate these folders:
+**IMPORTANT**: Create and populate these folders before running the analysis:
 
-1. **`property/`** - Contains property data for microbial opsins:
-   - `mo_exp.csv`: Main experimental data properties
-   - `helices.json`: Helix definitions
-   - Other supporting files
+1. **`property/`** - Property data files:
+   - `mo_exp.csv`: Experimental opsin properties (required)
+   - `helices_curated.json`: Helix boundary definitions (required)
 
-2. **`structures/`** - Contains structure files organized in subdirectories:
-   - `hideaki_exp/`: Experimental structures from Hideaki dataset (CIF format)
-   - `hideaki_pred/`: Predicted structures from Hideaki dataset (CIF format)
-   - `mo_pred/`: Predicted microbial opsin structures (CIF format)
+2. **`structures/`** - Structure files in CIF format:
+   - `hideaki_exp/`: Experimental structures from Hideaki dataset
+   - `hideaki_pred/`: AlphaFold predictions for Hideaki dataset
+   - `mo_pred/`: AlphaFold predictions for microbial opsins
 
-Directory structure example:
-```
-MOGRN/
-├── property/
-│   ├── mo_exp.csv
-│   ├── helices.json
-│   └── ...
-├── structures/
-│   ├── hideaki_exp/
-│   │   └── [structure files (.cif)]
-│   ├── hideaki_pred/
-│   │   └── [structure files (.cif)]
-│   └── mo_pred/
-│       └── [structure files (.cif)]
-└── ...
-```
+## Analysis Pipeline
 
-## Project Structure
+The complete analysis involves six main steps:
 
-The project is organized as follows:
-- **Main workflow scripts** are in the root directory:
-  - `prepare_data_fixed.py`: Data preparation and initialization
-  - `prepare_yaml.py`: Configuration generation for sequences
-  - `opsin_analysis_workflow.py`: Main analysis pipeline
-  - `plot.py`: Visualization generation
-- **Helper modules** are in the `src/` directory:
-  - Processing utilities
-  - Analysis tools
-  - Visualization functions
-
-## Workflow Steps
-
-### Step 1: Prepare Data Infrastructure and Initialize Datasets
-
+### Step 1: Data Preparation
 ```bash
-python prepare_data_fixed.py
+python prepare_data.py
 ```
+Initializes the data infrastructure, validates structure files, and sets up caching.
 
-This step:
-- Reviews and organizes property data for microbial opsins
-- Sets up the necessary directory structure for analysis
-- Initializes the ProtosPaths system for file path management
-- Creates data directories for user-writable and reference data
-- Sets up the CifBaseProcessor for managing protein structures
-- Processes experimental and predicted microbial opsin structures
-- Validates datasets to ensure all structures are accessible
-- Sets up caching for efficient data retrieval
-
-### Step 2: Create YAML Configuration Files for Protein Sequences
-
+### Step 2: Sequence Configuration
 ```bash
 python prepare_yaml.py
 ```
+Generates YAML configuration files for protein sequences with proper formatting.
 
-This step:
-- Processes protein sequence data from CSV files
-- Creates YAML files for each protein with proper sequence formatting
-- Extracts sequence segments using start/end positions when available
-- Creates special configurations for proteins with multiple retinals
-- Validates amino acid sequences and cleans invalid characters
-
-### Step 3: Run Analysis Workflow
-
+### Step 3: Core Analysis Workflow
 ```bash
 python opsin_analysis_workflow.py
 ```
+Performs structural alignment, RMSD calculations, helix identification, and GRN assignment.
 
-This step performs the complete analysis pipeline:
-1. **Structure Loading**: Loads opsin structures from prepared datasets with caching
-2. **Error Calculation**: Computes RMSD errors between paired structures
-3. **Helix Annotation**: Identifies and labels helical segments 
-4. **Structure Comparison**: Creates RMSD matrices and visualizes relationships
-5. **GRN Assignment**: Aligns structures and assigns standard numbering
-
-### Step 4: Generate Visualizations
-
+### Step 4: Manuscript Visualizations
 ```bash
 python plot.py
 ```
+Generates RMSD heatmaps, similarity trees, distance plots, and conservation visualizations.
 
-This step creates visualizations from the analysis results:
-- RMSD heatmaps showing structural similarities
-- Similarity trees clustering structures by similarity
-- Distance plots showing proximity to retinal
-- Conservation plots showing amino acid conservation
-- Helix logo plots displaying sequence patterns
-- Overview plots summarizing key findings
+### Step 5: GRN Conservation Analysis
+```bash
+python analyze_grns.py
+```
+**New comprehensive analysis** including:
+- Conservation patterns at functionally critical positions
+- Functional group discrimination (pumps vs channels)
+- Co-evolution network analysis
+- Domain-specific conservation patterns
+- Multi-panel summary figures
 
-## Output Files
+### Step 6: Motif Pattern Analysis
+```bash
+python analyze_motifs.py
+```
+**Advanced motif analysis** featuring:
+- Single position conservation analysis
+- Literature motif validation (DTD, etc.)
+- Cross-functional pattern detection
+- Novel motif family discovery
+- Correlation analysis within functional groups
 
-The analysis produces several key output files:
-- **rmsd_matrix.csv**: Pairwise RMSD values between all structures
-- **msa_table_grn.csv**: Multiple sequence alignment with GRN positions
-- **ca_distance_table_grn.csv**: C-alpha distances from each residue to retinal
-- **distance_table_grn.csv**: Sidechain distances to retinal with GRN positions
-- **protein_summary.csv**: Summary of analyzed proteins with key metrics
+## Output Structure
+
+```
+MOGRN/
+├── output/                          # Core analysis results
+│   ├── rmsd_matrix.csv             # Pairwise structural similarities
+│   ├── msa_table_grn.csv           # Aligned sequences with GRN
+│   ├── distance_table_grn.csv      # Residue-retinal distances
+│   └── protein_summary.csv         # Structure quality metrics
+├── opsin_output/
+│   ├── grn_analysis/               # GRN conservation analysis
+│   │   ├── conservation/           # Conservation data files
+│   │   ├── figures/                # Multi-panel visualizations
+│   │   └── reports/                # Detailed text reports
+│   └── motifs/                     # Motif analysis results
+│       ├── single_position_analysis/
+│       ├── literature_motifs/
+│       └── correlation_analysis/
+└── figures/                        # Standard visualization plots
+```
+
+## Key Results and Interpretation
+
+### Conservation Analysis Results
+
+The GRN conservation analysis reveals:
+- **Universal Conservation**: K7.50 (Schiff base) and W6.50 (retinal pocket)
+- **Functional Switches**: Position 3.50 discriminates pumps (T) from channels (C)
+- **Domain Patterns**: Archaea show highest conservation; Eukaryotes most diverse
+
+### Motif Analysis Results
+
+Key functional motifs identified:
+
+### Functional Discrimination
+
+The analysis identifies positions that determine functional properties:
+```
+Pumps:    T3.50 + S5.50 + M4.50 → Tight structure, controlled transport
+Channels: C3.50 + G5.50 + T4.50 → Flexible gating, ion selectivity
+```
+
+### Visualization Options
+
+```bash
+# Custom figure directories
+python plot.py --input-dir custom_output --output-dir custom_figures
+
+# Specific plot types
+python plot.py --plots "rmsd,conservation,distance"
+
+# High DPI output
+python plot.py --dpi 600
+```
 
 ## Module Architecture
 
-The workflow is divided into specialized modules:
-- **data_processing.py**: Loads, filters, and preprocesses opsin structures
-- **structure_comparison.py**: Compares and aligns structures, calculates RMSD
-- **helix_analysis.py**: Identifies and annotates transmembrane helices
-- **error_analysis.py**: Analyzes errors between experimental and predicted structures
-- **msa_grn.py**: Handles multiple sequence alignment and GRN assignment
-- **assign_grns.py**: Assigns Generic Residue Numbers to standardize residue positions
-- **visualization_functions.py**: Creates visualizations of alignments and analysis results
-- **foldmason_helpers.py**: Interfaces with FoldMason structure alignment tools
-- **opsin_analysis_workflow.py**: Orchestrates the complete analysis pipeline
+### Core Analysis Modules
+- **data_processing.py**: Structure loading and preprocessing
+- **structure_comparison.py**: RMSD calculations and alignment
+- **helix_analysis.py**: Transmembrane helix identification
+- **msa_grn.py**: Multiple sequence alignment with GRN
+- **assign_grns.py**: GRN assignment orchestration
 
-## Advanced Usage
+### New Analysis Modules
+- **analyze_grns.py**: Conservation and co-evolution analysis
+- **analyze_motifs.py**: Motif detection and validation
+- **property_mapping.py**: Unified property-structure mapping
 
-For customized workflow options:
-
-```bash
-# Run with custom output directory
-python opsin_analysis_workflow.py --output-dir custom_output
-
-# Run without using cached results
-python opsin_analysis_workflow.py --no-cache
-
-# Generate visualizations with specific input and output directories
-python plot.py --input-dir custom_output --output-dir custom_figures
-```
+### Visualization Modules
+- **visualization_functions.py**: Core plotting functions
+- **plot.py**: Main visualization script with extended capabilities
+- **opsin_color_scheme.py**: Consistent coloring for functional groups
 
 ## Dependencies
 
-This project depends on several key packages:
-- **Protos**: Framework for protein structure analysis (https://github.com/flurinh/protos.git)
-- **BioPython**: For sequence and structure manipulation
-- **NumPy/Pandas**: For data analysis and manipulation
-- **Matplotlib/Seaborn**: For visualization
-- **FoldMason**: For structure alignment (included in Protos)
+- **Python 3.8+**
+- **Protos**: Protein structure analysis framework
+- **BioPython**: Sequence and structure manipulation
+- **NumPy/Pandas**: Data analysis
+- **Matplotlib/Seaborn**: Visualization
+- **scikit-learn**: Clustering and statistics
+
+## Citation
+
+If you use MOGRN in your research, please cite:
+```
+[Citation information to be added]
+```
 
 ## Detailed Documentation
 
-For a complete explanation of the project's workflow and how to run each step, see the `GUIDE.md` file.
+For comprehensive step-by-step instructions, see:
+- **GUIDE.md**: Detailed English guide
+- **GUIDE_JP.md**: Japanese translation (日本語ガイド)
+
+## Troubleshooting
+
+Common issues and solutions:
+1. **Missing structures**: Ensure all CIF files are in correct directories
+2. **Memory errors**: Use `--no-cache` flag or process in batches
+3. **Import errors**: Verify Protos installation with `python -c "import protos"`

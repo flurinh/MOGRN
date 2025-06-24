@@ -4,7 +4,7 @@
 
 ### 1. Environment Setup
 ```bash
-# conda activate mogrn
+source /home/hidberf/miniconda/etc/profile.d/conda.sh && conda activate mogrn
 
 # Verify Protos is installed
 python -c "import protos; print('Protos version:', protos.__version__)"

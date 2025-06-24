@@ -1,0 +1,38 @@
+Here are the protein sequence details for the specified rhodopsins:
+
+1. Heimdallarchaeial Rhodopsin (HeimdallR1)
+HeimdallR1 is a proton-pumping rhodopsin identified in 'Candidatus Heimdallarchaeia', an Asgard archaeon of significant evolutionary interest. It is notable for its predicted "fenestration," a structural opening that allows it to bind with carotenoid antennas like fucoxanthin and lutein, enhancing its light-harvesting capabilities.  
+
+While the full FASTA sequence is not explicitly detailed in the reviewed literature, its key identifiers have been deposited in public databases:
+
+Organism: Candidatus Heimdallarchaeota archaeon   
+UniProt Accession: A0A2E9CEV6   
+PDB ID: 9JTQ   
+These identifiers can be used to retrieve the full sequence from their respective databases.
+
+2. Apusomonad Rhodopsins (ApuRs)
+ApuRs are a recently discovered and entirely new family of anion-selective rhodopsin channels found exclusively in apusomonads, a group of protists. Their discovery is significant as they represent a case of convergent evolution, having developed channel functionality independently from other known channelrhodopsins.  
+
+The literature describes a family of twelve non-redundant ApuR proteins, which exhibit high sequence diversity. Specific examples that have been identified include:  
+
+TtApuR from Thecamonas trahens
+SfApuR1 and SfApuR2 from Singekia franciliensis
+PkApuR from Podomonas kaiyoae
+TaraApuR from the Tara Oceans metagenome   
+The full protein sequences for this family have been deposited in a public repository (figshare) by the authors of the discovery paper, but they are not listed within the body of the reviewed articles.  
+
+3. CryoRhodopsins (CryoR1 and CryoR2)
+CryoRhodopsins are a novel clade of rhodopsins identified in cold-adapted bacteria from environments such as glaciers. They are distinguished by a unique buried arginine residue and exhibit an unprecedented dual functionality, capable of switching between an inward proton pump and a photosensor, a process modulated by UV light.  
+
+The full protein sequences for the two characterized examples, CryoR1 and CryoR2, are available through their database accession numbers.
+
+CryoR1:
+GenBank ID: WP_166787544   
+Electron Microscopy Data Bank (EMDB) IDs: EMD-18795, EMD-18796, EMD-18797, EMD-18798   
+CryoR2:
+GenBank ID: UFS59673.1   
+PDB IDs: 8R96, 8R97, 8R98   
+A related CryoRhodopsin from the organism Cryobacterium levicorallinum has also been structurally characterized:
+UniProt Accession: A0A1I3DJQ0   
+PDB IDs: 8R0O, 8R0K   
+These accession numbers provide direct access to the full protein sequences and structural data for this novel family of rhodopsins.

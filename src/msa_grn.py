@@ -7,10 +7,67 @@ import numpy as np
 import pandas as pd
 import re
 import os
+import json
+from pathlib import Path
 from scipy.spatial.distance import cdist
 import matplotlib.pyplot as plt
 
 from src.visualization_functions import visualize_msa_distances
+
+
+def load_helix_boundaries(structure_id, helices_file='property/helices_curated.json'):
+    """
+    Load helix boundaries for a given structure from the helices_curated.json file.
+    
+    Args:
+        structure_id: ID of the structure to get helix boundaries for
+        helices_file: Path to the JSON file containing helix boundaries
+        
+    Returns:
+        List of [start, end] positions for each helix, or None if not found
+    """
+    helices_path = Path(helices_file)
+    
+    # Try different possible paths
+    if not helices_path.exists():
+        # Try from project root
+        project_root = Path(__file__).parent.parent
+        helices_path = project_root / helices_file
+        
+    if not helices_path.exists():
+        print(f"[ERROR] Helices file not found: {helices_file}")
+        return None
+        
+    try:
+        with open(helices_path, 'r') as f:
+            helices_data = json.load(f)
+            
+        if structure_id not in helices_data:
+            print(f"[ERROR] Structure {structure_id} not found in helices file")
+            return None
+            
+        # Convert from dict format to list format expected by the code
+        structure_helices = helices_data[structure_id]
+        tm_ranges = []
+        
+        # Ensure helices are in order 1-7
+        for helix_num in range(1, 8):
+            helix_key = str(helix_num)
+            if helix_key in structure_helices:
+                tm_ranges.append(structure_helices[helix_key])
+            else:
+                print(f"[WARNING] Helix {helix_num} not found for structure {structure_id}")
+                return None
+                
+        print(f"[INFO] Loaded helix boundaries for {structure_id} from {helices_file}")
+        for i, (start, end) in enumerate(tm_ranges, 1):
+            print(f"[INFO] Helix {i}: Auth_seq_id range {start}-{end}")
+            
+        return tm_ranges
+        
+    except Exception as e:
+        print(f"[ERROR] Error loading helix boundaries: {e}")
+        return None
 
 
 def create_msa_table(seq_alignment_dicts, processed_structures_complete, global_ref, atom_type="all"):
@@ -320,9 +377,11 @@ def sort_grn_columns(df):
     """
     Sorts columns of a GRN-labeled DataFrame in the correct order based on GRN system.
     
+    Uses Protos GRN sorting if available, otherwise falls back to custom sorting.
+    
     The order follows the GRN system:
     1. N-terminal (n.XX) 
-    2. TM helices in order (1xYY through 7xYY, with positions sorted numerically)
+    2. TM helices in order (1.YY through 7.YY, with positions sorted numerically)
     3. Loop regions (AB.CCC)
     4. C-terminal regions (c.XX)
     5. Any other labels
@@ -333,6 +392,22 @@ def sort_grn_columns(df):
     Returns:
         DataFrame: DataFrame with sorted columns
     """
+    # Try to use Protos GRN sorting if available
+    try:
+        from protos.grn.grn_utils import sort_grns_str
+        
+        # Convert column names to strings
+        column_names = [str(col) for col in df.columns]
+        
+        # Sort using Protos GRN sorting
+        sorted_columns = sort_grns_str(column_names, output_notation_type='dot')
+        
+        # Return DataFrame with sorted columns
+        return df[sorted_columns]
+        
+    except ImportError:
+        print("[INFO] Protos GRN sorting not available, using fallback sorting")
+        # Fall back to custom sorting logic below
     # Function to convert GRN label to a float value for consistent sorting
     def grn_to_sortable_value(label):
         if not isinstance(label, str):
@@ -369,11 +444,12 @@ def sort_grn_columns(df):
             return float(f"{helix}.{pos}")
         
         # Loop regions: AB.CCC format
-        match_loop = re.match(r'(\d+)(\d+)\.(\d+)', label)
+        match_loop = re.match(r'(\d)(\d)\.(\d+)', label)
         if match_loop:
             closer_helix, further_helix, distance = match_loop.groups()
-            # Scale the distance to be between the helix numbers
-            return float(f"{closer_helix}{further_helix}.{distance}")
+            # Position loop after the first helix
+            # e.g., 12.003 should come after helix 1 positions
+            return float(closer_helix) + 0.9 + (0.0001 * float(distance))
         
         # General loop label (L.X)
         if label.startswith('L.'):
@@ -881,7 +957,8 @@ def calculate_helix_distances(distance_table):
     return helix_stats
 
 def generate_grn_msa_tables(seq_alignment_dicts, processed_structures_complete, global_ref,
-                         rmsd_df=None, max_rmsd_threshold=3.0, structure_mapping=None):
+                         rmsd_df=None, max_rmsd_threshold=3.0, structure_mapping=None,
+                         helices_file='property/helices_curated.json'):
     """
     Creates all MSA tables with proper GRN (Generic Residue Numbering) column names.
     This function is a critical component for standardized analysis of membrane proteins:
@@ -899,6 +976,7 @@ def generate_grn_msa_tables(seq_alignment_dicts, processed_structures_complete, 
         rmsd_df: Optional DataFrame with RMSD values between structures
         max_rmsd_threshold: Maximum RMSD to global reference for inclusion (default: 3.0)
         structure_mapping: Optional mapping from experimental to predicted structures
+        helices_file: Path to JSON file containing helix boundaries (default: 'property/helices_curated.json')
 
     Returns:
         dict: Dictionary with tables using GRN column names
@@ -1052,31 +1130,20 @@ def generate_grn_msa_tables(seq_alignment_dicts, processed_structures_complete, 
     ref_struct = filtered_structures[global_ref]
     ref_df = ref_struct['df_ca_norm']
 
-    # VERY IMPORTANT: WE NEED TO SET THE TM RANGES FOR THE GLOBAL REFERENCE (SEE DEBUGING PRINT STATEMENT)
-    # Create column mapping using the predefined TM helix ranges
-
-    """
-    # tm_ranges of CnChR2_J230_refine9
-    tm_ranges = [
-        [88, 111],
-        [120, 140],
-        [157, 176],
-        [188, 209],
-        [212, 232],
-        [250, 273],
-        [285, 304]
-    ]
-    """
-    # tm ranges of mermaid
-    tm_ranges = [
-        [4, 27],   # Helix 1
-        [35, 54],  # Helix 2
-        [74, 93],  # Helix 3
-        [104, 123], # Helix 4
-        [129, 155], # Helix 5
-        [166, 188], # Helix 6
-        [198, 226], # Helix 7
-    ]
+    # Load helix boundaries from helices_curated.json
+    tm_ranges = load_helix_boundaries(global_ref, helices_file)
+    
+    if tm_ranges is None:
+        print(f"[ERROR] Could not load helix boundaries for reference {global_ref}")
+        return {
+            "residue_table": pd.DataFrame(),
+            "distance_table": pd.DataFrame(),
+            "ca_residue_table": pd.DataFrame(),
+            "ca_distance_table": pd.DataFrame(),
+            "helix_stats": {},
+            "ca_helix_stats": {},
+            "excluded_structures": []
+        }
 
     # Get the column to auth_seq_id mapping
     column_to_auth_seq = residue_table.attrs.get('column_to_auth_seq', {})
@@ -1260,75 +1327,79 @@ def generate_grn_msa_tables(seq_alignment_dicts, processed_structures_complete, 
     ca_residue_table_grn.attrs['column_mapping'] = column_mapping
     ca_distance_table_grn.attrs['column_mapping'] = column_mapping
 
-    # Save the tables immediately after GRN column assignment
-    try:
-        print("[INFO] Saving MSA tables with GRN column names...")
-        output_dir = "opsin_output/opsin_grn_tables"
-        os.makedirs(output_dir, exist_ok=True)
+    # Save the tables immediately after GRN column assignment (optional debugging)
+    # This section saves additional debugging information
+    debug_save = False  # Set to True to save debugging files
+    if debug_save:
+        try:
+            print("[INFO] Saving MSA debugging tables with GRN column names...")
+            debug_output_dir = "opsin_output/debug_grn_tables"
+            os.makedirs(debug_output_dir, exist_ok=True)
 
-        # Save the tables with GRN column names
-        residue_table_grn.to_csv(f"{output_dir}/residue_table_grn.csv")
-        distance_table_grn.to_csv(f"{output_dir}/distance_table_grn.csv")
-        ca_residue_table_grn.to_csv(f"{output_dir}/ca_residue_table_grn.csv")
-        ca_distance_table_grn.to_csv(f"{output_dir}/ca_distance_table_grn.csv")
+            # Save the tables with GRN column names
+            residue_table_grn.to_csv(f"{debug_output_dir}/residue_table_grn.csv")
+            distance_table_grn.to_csv(f"{debug_output_dir}/distance_table_grn.csv")
+            ca_residue_table_grn.to_csv(f"{debug_output_dir}/ca_residue_table_grn.csv")
+            ca_distance_table_grn.to_csv(f"{debug_output_dir}/ca_distance_table_grn.csv")
 
-        # Create a column mapping DataFrame
-        mapping_records = []
-        original_columns = list(residue_table.columns)
+            # Create a column mapping DataFrame
+            mapping_records = []
+            original_columns = list(residue_table.columns)
 
-        for i, (orig_col, grn_label) in enumerate(zip(original_columns, new_columns)):
-            auth_seq_id = column_to_auth_seq.get(orig_col, "unknown")
-            helix_num = column_to_helix.get(orig_col, "")
+            for i, (orig_col, grn_label) in enumerate(zip(original_columns, new_columns)):
+                auth_seq_id = column_to_auth_seq.get(orig_col, "unknown")
+                helix_num = column_to_helix.get(orig_col, "")
 
-            record = {
-                "Original_Column": orig_col,
-                "GRN_Label": grn_label,
-                "Auth_Seq_ID": auth_seq_id,
-                "Helix": helix_num if helix_num else "",
-                "Is_Pivot": "Yes" if orig_col in helix_pivot_columns.values() else "No"
+                record = {
+                    "Original_Column": orig_col,
+                    "GRN_Label": grn_label,
+                    "Auth_Seq_ID": auth_seq_id,
+                    "Helix": helix_num if helix_num else "",
+                    "Is_Pivot": "Yes" if orig_col in helix_pivot_columns.values() else "No"
+                }
+                mapping_records.append(record)
+
+            # Save the column mapping as CSV
+            mapping_df = pd.DataFrame(mapping_records)
+            mapping_df.to_csv(f"{debug_output_dir}/column_mapping.csv", index=False)
+
+            # Save a CSV with both original and GRN column names for each table
+            for name, table, prefix in [
+                ("Residue Table", residue_table, "residue"),
+                ("Distance Table", distance_table, "distance"),
+                ("CA Residue Table", ca_residue_table, "ca_residue"),
+                ("CA Distance Table", ca_distance_table, "ca_distance")
+            ]:
+                # Create a copy with both original and GRN column names
+                dual_table = table.copy()
+
+                # Create new column names with both original and GRN
+                dual_columns = [f"{orig}|{grn}" for orig, grn in zip(original_columns, new_columns)]
+                dual_table.columns = dual_columns
+
+                # Save with dual column names
+                dual_table.to_csv(f"{debug_output_dir}/{prefix}_table_dual.csv")
+
+            # Also save a pickle version with full metadata
+            import pickle
+            grn_tables = {
+                "residue_table": residue_table_grn,
+                "distance_table": distance_table_grn,
+                "ca_residue_table": ca_residue_table_grn,
+                "ca_distance_table": ca_distance_table_grn,
+                "column_mapping": column_mapping,
+                "column_to_auth_seq": column_to_auth_seq,
+                "column_to_helix": column_to_helix,
+                "helix_pivot_columns": helix_pivot_columns
             }
-            mapping_records.append(record)
+            with open(f"{debug_output_dir}/grn_tables.pkl", "wb") as f:
+                pickle.dump(grn_tables, f)
 
-        # Save the column mapping as CSV
-        mapping_df = pd.DataFrame(mapping_records)
-        mapping_df.to_csv(f"{output_dir}/column_mapping.csv", index=False)
-
-        # Save a CSV with both original and GRN column names for each table
-        for name, table, prefix in [
-            ("Residue Table", residue_table, "residue"),
-            ("Distance Table", distance_table, "distance"),
-            ("CA Residue Table", ca_residue_table, "ca_residue"),
-            ("CA Distance Table", ca_distance_table, "ca_distance")
-        ]:
-            # Create a copy with both original and GRN column names
-            dual_table = table.copy()
-
-            # Create new column names with both original and GRN
-            dual_columns = [f"{orig}|{grn}" for orig, grn in zip(original_columns, new_columns)]
-            dual_table.columns = dual_columns
-
-            # Save with dual column names
-            dual_table.to_csv(f"{output_dir}/{prefix}_table_dual.csv")
-
-        # Also save a pickle version with full metadata
-        import pickle
-        grn_tables = {
-            "residue_table": residue_table_grn,
-            "distance_table": distance_table_grn,
-            "ca_residue_table": ca_residue_table_grn,
-            "ca_distance_table": ca_distance_table_grn,
-            "column_mapping": column_mapping,
-            "column_to_auth_seq": column_to_auth_seq,
-            "column_to_helix": column_to_helix,
-            "helix_pivot_columns": helix_pivot_columns
-        }
-        with open(f"{output_dir}/grn_tables.pkl", "wb") as f:
-            pickle.dump(grn_tables, f)
-
-        print(f"[INFO] Tables saved to {output_dir}/")
-        print(f"[INFO] Column mapping saved to {output_dir}/column_mapping.csv")
-    except Exception as e:
-        print(f"[WARNING] Could not save GRN tables: {e}")
+            print(f"[INFO] Debug tables saved to {debug_output_dir}/")
+            print(f"[INFO] Column mapping saved to {debug_output_dir}/column_mapping.csv")
+        except Exception as e:
+            print(f"[WARNING] Could not save debug GRN tables: {e}")
+    
     print(f"[DEBUG] Sample column names: {', '.join(str(col) for col in list(residue_table_grn.columns)[:10])}")
 
     # Count columns by format

@@ -14,5 +14,10 @@ opsin_output
 mock_data
 rotation_frontview_1080
 animation
+literature_review.md
+novel_targets.txt
+PRELIMINARY_RESULTS.md
 
+.claude
+claude/
 CLAUDE.md

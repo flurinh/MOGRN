@@ -22,7 +22,7 @@ from src.msa_grn import (
 )
 
 
-def align_and_assign_grn(data_dict, output_dir='output', visualize=True):
+def align_and_assign_grn(data_dict, output_dir='output', visualize=True, global_ref_override=None, helices_file='property/helices_curated.json'):
     """
     Step 6: Structure alignment and GRN assignment
 
@@ -34,6 +34,8 @@ def align_and_assign_grn(data_dict, output_dir='output', visualize=True):
         data_dict: Dictionary with data from previous steps
         output_dir: Directory to save output files
         visualize: Whether to generate visualizations
+        global_ref_override: Optional override for global reference structure ID
+        helices_file: Path to JSON file containing helix boundaries
 
     Returns:
         Dictionary with alignment data
@@ -103,12 +105,14 @@ def align_and_assign_grn(data_dict, output_dir='output', visualize=True):
 
     print(type_reference_dict)
 
-    global_ref = find_global_reference(rmsd_df.loc[pdb_list, pdb_list], type_reference_dict)
-
-    # extremely important, the reference below if hardcoded must be updated in msa_grn.py!!!!
-    # global_ref = 'CnChR2_J230_refine9'
-
-    print(f"Global reference structure: {global_ref}")
+    if global_ref_override:
+        # Use the provided override
+        global_ref = global_ref_override
+        print(f"Using override global reference structure: {global_ref}")
+    else:
+        # Find global reference automatically
+        global_ref = find_global_reference(rmsd_df.loc[pdb_list, pdb_list], type_reference_dict)
+        print(f"Automatically selected global reference structure: {global_ref}")
 
     # Use cached alignment paths instead of recalculating alignments
     print("Using cached alignment paths from step 5 instead of recalculating alignments...")
@@ -133,7 +137,8 @@ def align_and_assign_grn(data_dict, output_dir='output', visualize=True):
             global_ref,
             rmsd_df=rmsd_df,  # Pass RMSD matrix for filtering
             max_rmsd_threshold=3.2,  # Filter structures with RMSD > 3.0 to reference
-            structure_mapping=structure_mapping  # Pass structure mapping to prioritize experimental structures
+            structure_mapping=structure_mapping,  # Pass structure mapping to prioritize experimental structures
+            helices_file=helices_file  # Pass helices file path
         )
 
         # Extract tables
@@ -148,11 +153,16 @@ def align_and_assign_grn(data_dict, output_dir='output', visualize=True):
             print(f"\n[INFO] {excluded_count} structures were excluded from MSA due to high RMSD (>3.0Å)")
             print(f"[INFO] Final MSA includes {len(msa_df)} structures and {len(msa_df.columns)} positions")
 
+        # Create a subdirectory for global reference outputs
+        global_output_dir = os.path.join(output_dir, 'global_reference_grn')
+        os.makedirs(global_output_dir, exist_ok=True)
+        print(f"Saving global reference outputs to: {global_output_dir}")
+        
         # Save the tables using direct file operations
-        msa_df.to_csv(os.path.join(output_dir, "msa_table_grn.csv"))
-        distance_table.to_csv(os.path.join(output_dir, "distance_table_grn.csv"))
-        ca_msa_df.to_csv(os.path.join(output_dir, "ca_msa_table_grn.csv"))
-        ca_distance_table.to_csv(os.path.join(output_dir, "ca_distance_table_grn.csv"))
+        msa_df.to_csv(os.path.join(global_output_dir, "msa_table_grn.csv"))
+        distance_table.to_csv(os.path.join(global_output_dir, "distance_table_grn.csv"))
+        ca_msa_df.to_csv(os.path.join(global_output_dir, "ca_msa_table_grn.csv"))
+        ca_distance_table.to_csv(os.path.join(global_output_dir, "ca_distance_table_grn.csv"))
 
         _50_positions = []
 
@@ -195,7 +205,7 @@ def align_and_assign_grn(data_dict, output_dir='output', visualize=True):
 
         # Now run the tree-based alignment method as an additional approach
         print("\n=== Running Tree-Based Alignment as Additional Method ===")
-        tree_based_results = run_tree_based_alignment(data_dict, output_dir, visualize)
+        tree_based_results = run_tree_based_alignment(data_dict, output_dir, visualize, helices_file=helices_file)
 
         # Combine results from both methods
         result_dict = {
@@ -239,7 +249,7 @@ def align_and_assign_grn(data_dict, output_dir='output', visualize=True):
         }
 
 
-def run_tree_based_alignment(data_dict, output_dir='output', visualize=True, method='average'):
+def run_tree_based_alignment(data_dict, output_dir='output', visualize=True, method='weighted', helices_file='property/helices_curated.json'):
     """
     Run the tree-based alignment approach to generate alternative GRN assignments.
     
@@ -250,7 +260,9 @@ def run_tree_based_alignment(data_dict, output_dir='output', visualize=True, met
         data_dict: Dictionary with data from previous steps
         output_dir: Directory to save output files
         visualize: Whether to generate visualizations
-        method: Linkage method for hierarchical clustering ('average', 'single', 'complete', etc.)
+        method: Linkage method for hierarchical clustering ('weighted', 'average', 'single', 'complete', etc.)
+               Default is 'weighted' (WPGMA) which gives equal weight to each object
+        helices_file: Path to JSON file containing helix boundaries
         
     Returns:
         Dictionary with tree-based alignment results
@@ -258,7 +270,7 @@ def run_tree_based_alignment(data_dict, output_dir='output', visualize=True, met
     print("\nRunning tree-based alignment for GRN assignment...")
     
     # Create a subdirectory for tree-based outputs
-    tree_output_dir = os.path.join(output_dir, 'opsin_grn_based')
+    tree_output_dir = os.path.join(output_dir, 'tree_based_grn')
     os.makedirs(tree_output_dir, exist_ok=True)
     print(f"Saving tree-based outputs to: {tree_output_dir}")
     
@@ -289,7 +301,8 @@ def run_tree_based_alignment(data_dict, output_dir='output', visualize=True, met
             central_ref,
             rmsd_df=rmsd_df,
             max_rmsd_threshold=3.2,
-            structure_mapping=structure_mapping
+            structure_mapping=structure_mapping,
+            helices_file=helices_file
         )
         
         # Extract tables
@@ -305,10 +318,10 @@ def run_tree_based_alignment(data_dict, output_dir='output', visualize=True, met
             print(f"[INFO] Final tree-based MSA includes {len(msa_df)} structures and {len(msa_df.columns)} positions")
         
         # Save the tree-based tables
-        msa_df.to_csv(os.path.join(tree_output_dir, "msa_table_grn_tree.csv"))
-        distance_table.to_csv(os.path.join(tree_output_dir, "distance_table_grn_tree.csv"))
-        ca_msa_df.to_csv(os.path.join(tree_output_dir, "ca_msa_table_grn_tree.csv"))
-        ca_distance_table.to_csv(os.path.join(tree_output_dir, "ca_distance_table_grn_tree.csv"))
+        msa_df.to_csv(os.path.join(tree_output_dir, "msa_table_grn.csv"))
+        distance_table.to_csv(os.path.join(tree_output_dir, "distance_table_grn.csv"))
+        ca_msa_df.to_csv(os.path.join(tree_output_dir, "ca_msa_table_grn.csv"))
+        ca_distance_table.to_csv(os.path.join(tree_output_dir, "ca_distance_table_grn.csv"))
         
         print("Tree-based MSA and distance tables generated and saved.")
         

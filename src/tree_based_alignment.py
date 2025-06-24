@@ -9,7 +9,7 @@ import pandas as pd
 from scipy.cluster.hierarchy import linkage, dendrogram
 from scipy.spatial.distance import squareform
 
-def build_similarity_tree(rmsd_df, method='average'):
+def build_similarity_tree(rmsd_df, method='weighted'):
     """
     Build a similarity tree from RMSD matrix using hierarchical clustering.
     
@@ -17,6 +17,7 @@ def build_similarity_tree(rmsd_df, method='average'):
         rmsd_df: DataFrame with RMSD values between all structure pairs
         method: Linkage method for hierarchical clustering 
                 ('single', 'complete', 'average', 'weighted', 'centroid', 'median', 'ward')
+                Default is 'weighted' (WPGMA) which gives equal weight to each object
                 
     Returns:
         tuple: (linkage_matrix, ordered_structure_ids)
@@ -274,14 +275,14 @@ def generate_transitive_alignment_paths(alignment_paths, structure_ids, alignmen
     
     return enhanced_paths
 
-def create_tree_based_seq_alignment_dicts(rmsd_df, alignment_paths, method='average'):
+def create_tree_based_seq_alignment_dicts(rmsd_df, alignment_paths, method='weighted'):
     """
     Create sequence alignment dictionaries using the similarity tree approach.
     
     Args:
         rmsd_df: DataFrame with RMSD values
         alignment_paths: Dictionary with existing alignment paths
-        method: Linkage method for tree construction
+        method: Linkage method for tree construction (default: 'weighted')
         
     Returns:
         dict: Sequence alignment dictionary format compatible with generate_grn_msa_tables
@@ -360,13 +361,13 @@ def find_central_reference(rmsd_df):
     
     return central_ref
 
-def align_and_assign_grn_tree_based(data_dict, method='average'):
+def align_and_assign_grn_tree_based(data_dict, method='weighted'):
     """
     Wrapper function to create a tree-based alignment and prepare for GRN assignment.
     
     Args:
         data_dict: Dictionary with data from previous steps
-        method: Linkage method for tree construction
+        method: Linkage method for tree construction (default: 'weighted')
         
     Returns:
         tuple: (seq_alignment_dicts, central_ref, enhanced_paths)
