@@ -73,3 +73,4 @@
 [2025-06-24 21:19] [MODIFY] /mnt/c/Users/hidbe/PycharmProjects/MOGRN/README.md - Updated with comprehensive analysis explanation including new analyze_grns.py and analyze_motifs.py functionalities
 [2025-06-24 21:21] [MODIFY] /mnt/c/Users/hidbe/PycharmProjects/MOGRN/GUIDE.md - Updated with detailed step-by-step instructions for all 6 analysis steps including new GRN and motif analyses
 [2025-06-24 21:21] [MODIFY] /mnt/c/Users/hidbe/PycharmProjects/MOGRN/GUIDE_JP.md - Translated updated GUIDE.md to Japanese with all new analysis steps and comprehensive instructions
+[2025-06-24 21:25] [MODIFY] /mnt/c/Users/hidbe/PycharmProjects/MOGRN/GUIDE_JP.md - Updated Japanese translation to match all changes in GUIDE.md including Python 3.10, DTD motif, simplified sections
