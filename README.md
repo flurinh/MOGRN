@@ -240,9 +240,7 @@ If you use MOGRN in your research, please cite:
 
 ## Detailed Documentation
 
-For comprehensive step-by-step instructions, see:
-- **GUIDE.md**: Detailed English guide
-- **GUIDE_JP.md**: Japanese translation (日本語ガイド)
+For comprehensive step-by-step instructions, see the GUIDE.md
 
 ## Troubleshooting
 
