@@ -38,7 +38,7 @@ def run_opsin_analysis_workflow(output_dir=None,
                                 chain_id='A',
                                 retinal_name='RET',
                                 retinal_cutoff=6.0,
-                                global_ref_override=None,
+                                global_ref_override='4PXK',
                                 helices_file='property/helices_curated.json'):
     """
     Run the full opsin analysis workflow with standardized dataset handling

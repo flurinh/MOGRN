@@ -224,7 +224,7 @@ python plot.py --dpi 600
 
 ## Dependencies
 
-- **Python 3.8+**
+- **Python 3.10+**
 - **Protos**: Protein structure analysis framework
 - **BioPython**: Sequence and structure manipulation
 - **NumPy/Pandas**: Data analysis

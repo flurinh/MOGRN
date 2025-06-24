@@ -136,7 +136,7 @@ def align_and_assign_grn(data_dict, output_dir='output', visualize=True, global_
             processed_structures_complete,
             global_ref,
             rmsd_df=rmsd_df,  # Pass RMSD matrix for filtering
-            max_rmsd_threshold=3.2,  # Filter structures with RMSD > 3.0 to reference
+            max_rmsd_threshold=3.0,  # Filter structures with RMSD > 3.0 to reference
             structure_mapping=structure_mapping,  # Pass structure mapping to prioritize experimental structures
             helices_file=helices_file  # Pass helices file path
         )
@@ -300,7 +300,7 @@ def run_tree_based_alignment(data_dict, output_dir='output', visualize=True, met
             processed_structures,
             central_ref,
             rmsd_df=rmsd_df,
-            max_rmsd_threshold=3.2,
+            max_rmsd_threshold=3.0,
             structure_mapping=structure_mapping,
             helices_file=helices_file
         )
