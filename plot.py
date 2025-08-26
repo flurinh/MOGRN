@@ -47,8 +47,10 @@ from src.visualize_alignment_grn import create_opsin_visualization_from_workflow
 try:
     from src.property_mapping import create_unified_property_mapper
     from src.visualization_functions import (
+        compute_rmsd_metrics,
         create_opsin_overview_plot,
         visualize_rmsd_matrix_improved,
+        _annotate_metrics_on_clustergrid,
         plot_distances_with_std,
         plot_helix_logo_plots
     )
@@ -558,6 +560,40 @@ def main(args=None):
                 condensed_matrix = squareform(rmsd_matrix_for_linkage.values, checks=False)
                 Z_linkage = linkage(condensed_matrix, method='weighted')
 
+                # Compute linkage metrics
+
+                metrics = compute_rmsd_metrics(
+                    rmsd_df=rmsd_df,
+                    linkage_matrix=Z_linkage,
+                    thresholds=(2.0, 2.5, 3.0),
+                    n_clusters=2,
+                    outdir=FIGURES_OUTPUT_DIR / "rmsd_metrics"
+                )
+
+                # Attach function/domain annotations if you have dicts
+                names = rmsd_df.index.to_list()
+                labels = metrics["labels"]
+
+                def get_annotation(name):
+                    func = group_dict.get(name, "NA")
+                    dom = domain_dict.get(name, {}).get("domain", "NA")
+                    return func, dom
+
+                print("\nTop 3 reference-like opsins (lowest mean cross-cluster RMSD):")
+                for name, val in metrics["ref_like_top10"][:3]:
+                    idx = names.index(name)
+                    cluster = labels[idx]
+                    func, dom = get_annotation(name)
+                    print(
+                        f"  {name} | cross-cluster RMSD = {val:.2f} Å | cluster {cluster} | function={func} | domain={dom}")
+
+                print("\nTop 3 outlier opsins (highest mean global RMSD):")
+                for name, val in metrics["outliers_top10"][:3]:
+                    idx = names.index(name)
+                    cluster = labels[idx]
+                    func, dom = get_annotation(name)
+                    print(f"  {name} | global RMSD = {val:.2f} Å | cluster {cluster} | function={func} | domain={dom}")
+
                 # Call the improved visualization function
                 # Assuming visualize_rmsd_matrix_improved handles its own saving if output_file is passed
                 fig2 = visualize_rmsd_matrix_improved(
@@ -568,14 +604,18 @@ def main(args=None):
                     figsize=(18, 15),  # Adjusted figsize
                     output_file=FIGURES_OUTPUT_DIR / "02_rmsd_clustermap.png"  # Pass output file directly
                 )
-                if fig2 and hasattr(fig2, 'fig'):  # If it returns ClusterGrid object
-                    # If the function didn't save, or to be sure
-                    # fig2.fig.savefig(FIGURES_OUTPUT_DIR / "02_rmsd_clustermap.png", dpi=300)
-                    print(f"[INFO] RMSD Clustermap generation initiated (saved by function).")
+
+                if fig2 and hasattr(fig2, "ax_heatmap"):
+                    _annotate_metrics_on_clustergrid(fig2, metrics["overlay_text"])
+                    # Ensure saving (if your visualize function didn’t)
+                    fig2.fig.savefig(FIGURES_OUTPUT_DIR / "02_rmsd_clustermap.png", dpi=300)
                     plt.close(fig2.fig)
-                elif fig2:  # If it returns a Figure object directly
-                    # fig2.savefig(FIGURES_OUTPUT_DIR / "02_rmsd_clustermap.png", dpi=300)
-                    print(f"[INFO] RMSD Clustermap generation initiated (saved by function).")
+                elif fig2:  # raw Figure
+                    ax = fig2.axes[0] if fig2.axes else plt.gca()
+                    ax.text(0.01, 0.99, metrics["overlay_text"], transform=ax.transAxes, ha="left", va="top",
+                            fontsize=9, family="monospace",
+                            bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="black", lw=0.8, alpha=0.85))
+                    fig2.savefig(FIGURES_OUTPUT_DIR / "02_rmsd_clustermap.png", dpi=300)
                     plt.close(fig2)
                 else:
                     print("[WARN] RMSD Clustermap was not generated.")

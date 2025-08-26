@@ -1,0 +1,495 @@
+{
+  "timestamp": "2025-06-26 10:54:32",
+  "dataset_overview": {
+    "total_structures": 129,
+    "experimental_structures": 0,
+    "predicted_structures": 129,
+    "structures_with_annotations": 122
+  },
+  "function_distribution": {
+    "Proton Pump": {
+      "count": 42,
+      "percentage": 32.6
+    },
+    "Cation Channel": {
+      "count": 28,
+      "percentage": 21.7
+    },
+    "Sensor / Regulatory": {
+      "count": 22,
+      "percentage": 17.1
+    },
+    "Anion Channel": {
+      "count": 12,
+      "percentage": 9.3
+    },
+    "Chloride Pump": {
+      "count": 12,
+      "percentage": 9.3
+    },
+    "Unknown": {
+      "count": 7,
+      "percentage": 5.4
+    },
+    "Sodium Pump": {
+      "count": 6,
+      "percentage": 4.7
+    }
+  },
+  "domain_distribution": {
+    "Eukaryota": {
+      "count": 50,
+      "percentage": 38.8
+    },
+    "Bacteria": {
+      "count": 42,
+      "percentage": 32.6
+    },
+    "Archaea": {
+      "count": 27,
+      "percentage": 20.9
+    },
+    "Synthetic": {
+      "count": 5,
+      "percentage": 3.9
+    },
+    "Virus": {
+      "count": 5,
+      "percentage": 3.9
+    }
+  },
+  "function_domain_combinations": {
+    "combinations": {
+      "Anion Channel|Eukaryota": {
+        "function": "Anion Channel",
+        "domain": "Eukaryota",
+        "count": 10,
+        "percentage": 7.8
+      },
+      "Proton Pump|Bacteria": {
+        "function": "Proton Pump",
+        "domain": "Bacteria",
+        "count": 20,
+        "percentage": 15.5
+      },
+      "Chloride Pump|Bacteria": {
+        "function": "Chloride Pump",
+        "domain": "Bacteria",
+        "count": 8,
+        "percentage": 6.2
+      },
+      "Sensor / Regulatory|Eukaryota": {
+        "function": "Sensor / Regulatory",
+        "domain": "Eukaryota",
+        "count": 12,
+        "percentage": 9.3
+      },
+      "Proton Pump|Archaea": {
+        "function": "Proton Pump",
+        "domain": "Archaea",
+        "count": 16,
+        "percentage": 12.4
+      },
+      "Cation Channel|Synthetic": {
+        "function": "Cation Channel",
+        "domain": "Synthetic",
+        "count": 3,
+        "percentage": 2.3
+      },
+      "Cation Channel|Eukaryota": {
+        "function": "Cation Channel",
+        "domain": "Eukaryota",
+        "count": 23,
+        "percentage": 17.8
+      },
+      "Unknown|Bacteria": {
+        "function": "Unknown",
+        "domain": "Bacteria",
+        "count": 3,
+        "percentage": 2.3
+      },
+      "Sensor / Regulatory|Archaea": {
+        "function": "Sensor / Regulatory",
+        "domain": "Archaea",
+        "count": 5,
+        "percentage": 3.9
+      },
+      "Anion Channel|Virus": {
+        "function": "Anion Channel",
+        "domain": "Virus",
+        "count": 1,
+        "percentage": 0.8
+      },
+      "Unknown|Synthetic": {
+        "function": "Unknown",
+        "domain": "Synthetic",
+        "count": 1,
+        "percentage": 0.8
+      },
+      "Proton Pump|Eukaryota": {
+        "function": "Proton Pump",
+        "domain": "Eukaryota",
+        "count": 5,
+        "percentage": 3.9
+      },
+      "Sodium Pump|Bacteria": {
+        "function": "Sodium Pump",
+        "domain": "Bacteria",
+        "count": 6,
+        "percentage": 4.7
+      },
+      "Chloride Pump|Archaea": {
+        "function": "Chloride Pump",
+        "domain": "Archaea",
+        "count": 4,
+        "percentage": 3.1
+      },
+      "Sensor / Regulatory|Bacteria": {
+        "function": "Sensor / Regulatory",
+        "domain": "Bacteria",
+        "count": 5,
+        "percentage": 3.9
+      },
+      "Cation Channel|Virus": {
+        "function": "Cation Channel",
+        "domain": "Virus",
+        "count": 2,
+        "percentage": 1.6
+      },
+      "Unknown|Virus": {
+        "function": "Unknown",
+        "domain": "Virus",
+        "count": 1,
+        "percentage": 0.8
+      },
+      "Proton Pump|Virus": {
+        "function": "Proton Pump",
+        "domain": "Virus",
+        "count": 1,
+        "percentage": 0.8
+      },
+      "Anion Channel|Synthetic": {
+        "function": "Anion Channel",
+        "domain": "Synthetic",
+        "count": 1,
+        "percentage": 0.8
+      },
+      "Unknown|Archaea": {
+        "function": "Unknown",
+        "domain": "Archaea",
+        "count": 2,
+        "percentage": 1.6
+      }
+    },
+    "matrix": {
+      "Anion Channel": {
+        "Archaea": 0,
+        "Bacteria": 0,
+        "Eukaryota": 10,
+        "Synthetic": 1,
+        "Virus": 1
+      },
+      "Cation Channel": {
+        "Archaea": 0,
+        "Bacteria": 0,
+        "Eukaryota": 23,
+        "Synthetic": 3,
+        "Virus": 2
+      },
+      "Chloride Pump": {
+        "Archaea": 4,
+        "Bacteria": 8,
+        "Eukaryota": 0,
+        "Synthetic": 0,
+        "Virus": 0
+      },
+      "Proton Pump": {
+        "Archaea": 16,
+        "Bacteria": 20,
+        "Eukaryota": 5,
+        "Synthetic": 0,
+        "Virus": 1
+      },
+      "Sensor / Regulatory": {
+        "Archaea": 5,
+        "Bacteria": 5,
+        "Eukaryota": 12,
+        "Synthetic": 0,
+        "Virus": 0
+      },
+      "Sodium Pump": {
+        "Archaea": 0,
+        "Bacteria": 6,
+        "Eukaryota": 0,
+        "Synthetic": 0,
+        "Virus": 0
+      },
+      "Unknown": {
+        "Archaea": 2,
+        "Bacteria": 3,
+        "Eukaryota": 0,
+        "Synthetic": 1,
+        "Virus": 1
+      }
+    },
+    "top_20": [
+      {
+        "function": "Cation Channel",
+        "domain": "Eukaryota",
+        "count": 23,
+        "percentage": 17.8
+      },
+      {
+        "function": "Proton Pump",
+        "domain": "Bacteria",
+        "count": 20,
+        "percentage": 15.5
+      },
+      {
+        "function": "Proton Pump",
+        "domain": "Archaea",
+        "count": 16,
+        "percentage": 12.4
+      },
+      {
+        "function": "Sensor / Regulatory",
+        "domain": "Eukaryota",
+        "count": 12,
+        "percentage": 9.3
+      },
+      {
+        "function": "Anion Channel",
+        "domain": "Eukaryota",
+        "count": 10,
+        "percentage": 7.8
+      },
+      {
+        "function": "Chloride Pump",
+        "domain": "Bacteria",
+        "count": 8,
+        "percentage": 6.2
+      },
+      {
+        "function": "Sodium Pump",
+        "domain": "Bacteria",
+        "count": 6,
+        "percentage": 4.7
+      },
+      {
+        "function": "Sensor / Regulatory",
+        "domain": "Archaea",
+        "count": 5,
+        "percentage": 3.9
+      },
+      {
+        "function": "Proton Pump",
+        "domain": "Eukaryota",
+        "count": 5,
+        "percentage": 3.9
+      },
+      {
+        "function": "Sensor / Regulatory",
+        "domain": "Bacteria",
+        "count": 5,
+        "percentage": 3.9
+      },
+      {
+        "function": "Chloride Pump",
+        "domain": "Archaea",
+        "count": 4,
+        "percentage": 3.1
+      },
+      {
+        "function": "Cation Channel",
+        "domain": "Synthetic",
+        "count": 3,
+        "percentage": 2.3
+      },
+      {
+        "function": "Unknown",
+        "domain": "Bacteria",
+        "count": 3,
+        "percentage": 2.3
+      },
+      {
+        "function": "Cation Channel",
+        "domain": "Virus",
+        "count": 2,
+        "percentage": 1.6
+      },
+      {
+        "function": "Unknown",
+        "domain": "Archaea",
+        "count": 2,
+        "percentage": 1.6
+      },
+      {
+        "function": "Anion Channel",
+        "domain": "Virus",
+        "count": 1,
+        "percentage": 0.8
+      },
+      {
+        "function": "Unknown",
+        "domain": "Synthetic",
+        "count": 1,
+        "percentage": 0.8
+      },
+      {
+        "function": "Unknown",
+        "domain": "Virus",
+        "count": 1,
+        "percentage": 0.8
+      },
+      {
+        "function": "Proton Pump",
+        "domain": "Virus",
+        "count": 1,
+        "percentage": 0.8
+      },
+      {
+        "function": "Anion Channel",
+        "domain": "Synthetic",
+        "count": 1,
+        "percentage": 0.8
+      }
+    ]
+  },
+  "diversity_metrics": {
+    "shannon_diversity_function": 1.741,
+    "shannon_diversity_domain": 1.312,
+    "unique_combinations": 20,
+    "theoretical_max_combinations": 35,
+    "combination_coverage_percent": 57.1,
+    "natural": {
+      "functions": 6,
+      "domains": 4,
+      "combinations_observed": 14,
+      "theoretical_combinations": 24,
+      "coverage_percent": 58.3
+    }
+  },
+  "missing_combinations": {
+    "total_missing": 15,
+    "missing_list": [
+      [
+        "Anion Channel",
+        "Archaea"
+      ],
+      [
+        "Anion Channel",
+        "Bacteria"
+      ],
+      [
+        "Cation Channel",
+        "Archaea"
+      ],
+      [
+        "Cation Channel",
+        "Bacteria"
+      ],
+      [
+        "Chloride Pump",
+        "Eukaryota"
+      ],
+      [
+        "Chloride Pump",
+        "Synthetic"
+      ],
+      [
+        "Chloride Pump",
+        "Virus"
+      ],
+      [
+        "Proton Pump",
+        "Synthetic"
+      ],
+      [
+        "Sensor / Regulatory",
+        "Synthetic"
+      ],
+      [
+        "Sensor / Regulatory",
+        "Virus"
+      ],
+      [
+        "Sodium Pump",
+        "Archaea"
+      ],
+      [
+        "Sodium Pump",
+        "Eukaryota"
+      ],
+      [
+        "Sodium Pump",
+        "Synthetic"
+      ],
+      [
+        "Sodium Pump",
+        "Virus"
+      ],
+      [
+        "Unknown",
+        "Eukaryota"
+      ]
+    ],
+    "by_function": {
+      "Anion Channel": [
+        "Archaea",
+        "Bacteria"
+      ],
+      "Cation Channel": [
+        "Archaea",
+        "Bacteria"
+      ],
+      "Chloride Pump": [
+        "Eukaryota",
+        "Synthetic",
+        "Virus"
+      ],
+      "Proton Pump": [
+        "Synthetic"
+      ],
+      "Sensor / Regulatory": [
+        "Synthetic",
+        "Virus"
+      ],
+      "Sodium Pump": [
+        "Archaea",
+        "Eukaryota",
+        "Synthetic",
+        "Virus"
+      ],
+      "Unknown": [
+        "Eukaryota"
+      ]
+    },
+    "by_domain": {
+      "Archaea": [
+        "Anion Channel",
+        "Cation Channel",
+        "Sodium Pump"
+      ],
+      "Bacteria": [
+        "Anion Channel",
+        "Cation Channel"
+      ],
+      "Eukaryota": [
+        "Chloride Pump",
+        "Sodium Pump",
+        "Unknown"
+      ],
+      "Synthetic": [
+        "Chloride Pump",
+        "Proton Pump",
+        "Sensor / Regulatory",
+        "Sodium Pump"
+      ],
+      "Virus": [
+        "Chloride Pump",
+        "Sensor / Regulatory",
+        "Sodium Pump"
+      ]
+    }
+  }
+}

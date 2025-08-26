@@ -46,6 +46,145 @@ from src.opsin_color_scheme import (
 )
 
 
+import numpy as np
+import pandas as pd
+import json
+from pathlib import Path
+from scipy.cluster.hierarchy import fcluster
+from itertools import combinations
+
+def _pairwise_values_from_square(df: pd.DataFrame):
+    m = df.values.astype(float)
+    n = m.shape[0]
+    # exclude self (diag) and take upper triangle
+    triu = m[np.triu_indices(n, k=1)]
+    return triu[~np.isnan(triu)]
+
+
+def _cluster_masks(labels: np.ndarray):
+    """
+    Given an array of cluster labels (e.g. from fcluster),
+    return a dict mapping cluster_id -> boolean mask.
+    """
+    labs = np.asarray(labels)
+    return {c: (labs == c) for c in np.unique(labs)}
+
+def compute_rmsd_metrics(
+    rmsd_df: pd.DataFrame,
+    linkage_matrix,
+    thresholds=(2.0, 2.5, 3.0),
+    n_clusters=2,
+    outdir: Path = Path("metrics")
+):
+    outdir.mkdir(parents=True, exist_ok=True)
+    names = rmsd_df.index.to_list()
+    M = rmsd_df.values.astype(float)
+
+    # -------- Global distribution --------
+    all_pairs = _pairwise_values_from_square(rmsd_df)
+    def pct_below(x):
+        return {f"pct_pairs_lt_{t:.1f}A": float(np.mean(x < t) * 100.0) for t in thresholds}
+    global_stats = {
+        "n_structures": int(M.shape[0]),
+        "n_pairs": int(len(all_pairs)),
+        "median_RMSD": float(np.nanmedian(all_pairs)),
+        "IQR_RMSD": [float(np.nanpercentile(all_pairs, 25)), float(np.nanpercentile(all_pairs, 75))],
+        **pct_below(all_pairs),
+    }
+
+    # -------- Clusters (hierarchical cut) --------
+    labels = fcluster(linkage_matrix, n_clusters, criterion="maxclust")
+    cluster_masks = _cluster_masks(labels)
+    cluster_stats = {}
+    for cid, mask in cluster_masks.items():
+        idx = np.where(mask)[0]
+        sub = M[np.ix_(idx, idx)]
+        sub_pairs = _pairwise_values_from_square(pd.DataFrame(sub))
+        base_stats = {
+            "size": int(mask.sum()),
+            "median_intra": float(np.nanmedian(sub_pairs)) if len(sub_pairs) else np.nan,
+            "IQR_intra": [float(np.nanpercentile(sub_pairs,25)) if len(sub_pairs) else np.nan,
+                          float(np.nanpercentile(sub_pairs,75)) if len(sub_pairs) else np.nan],
+        }
+        cluster_stats[int(cid)] = base_stats | (pct_below(sub_pairs) if len(sub_pairs) else {})
+
+    # Inter-cluster (all pairs where labels differ)
+    inter_vals = []
+    for (c1, m1), (c2, m2) in combinations(cluster_masks.items(), 2):
+        sub = M[np.ix_(np.where(m1)[0], np.where(m2)[0])]
+        inter_vals.append(sub.reshape(-1))
+    inter_vals = np.concatenate(inter_vals) if len(inter_vals) else np.array([])
+    inter_stats = {
+        "median_inter": float(np.nanmedian(inter_vals)) if inter_vals.size else np.nan,
+        "IQR_inter": [float(np.nanpercentile(inter_vals,25)) if inter_vals.size else np.nan,
+                      float(np.nanpercentile(inter_vals,75)) if inter_vals.size else np.nan],
+        **(pct_below(inter_vals) if inter_vals.size else {})
+    }
+
+    # -------- Reference-like & outliers --------
+    # Reference-like score: mean RMSD to the OTHER cluster(s)
+    ref_scores = {}
+    for i in range(M.shape[0]):
+        other = M[i, labels != labels[i]]
+        other = other[~np.isnan(other)]
+        ref_scores[names[i]] = float(np.nanmean(other)) if other.size else np.nan
+    # Outlier score: mean RMSD to ALL others
+    out_scores = {}
+    for i in range(M.shape[0]):
+        row = M[i, :]
+        row = row[~np.isnan(row)]
+        out_scores[names[i]] = float(np.nanmean(row)) if row.size else np.nan
+
+    # rank
+    ref_like = sorted(ref_scores.items(), key=lambda kv: kv[1])[:10]  # lower is better
+    outliers = sorted(out_scores.items(), key=lambda kv: kv[1], reverse=True)[:10]  # higher is worse
+
+    # -------- Save to disk --------
+    (outdir / "rmsd_global_stats.json").write_text(json.dumps(global_stats, indent=2))
+    (outdir / "rmsd_cluster_stats.json").write_text(json.dumps({
+        "n_clusters": int(n_clusters),
+        "clusters": cluster_stats,
+        "inter": inter_stats
+    }, indent=2))
+    pd.DataFrame({"name": list(ref_scores.keys()), "ref_like_mean_crosscluster_rmsd": list(ref_scores.values())})\
+      .sort_values("ref_like_mean_crosscluster_rmsd").to_csv(outdir / "reference_like_top.csv", index=False)
+    pd.DataFrame({"name": list(out_scores.keys()), "outlier_mean_global_rmsd": list(out_scores.values())})\
+      .sort_values("outlier_mean_global_rmsd", ascending=False).to_csv(outdir / "outliers_top.csv", index=False)
+
+    # Compose short overlay text for the figure
+    overlay_lines = [
+        f"Global median RMSD = {global_stats['median_RMSD']:.2f} Å (IQR {global_stats['IQR_RMSD'][0]:.2f}–{global_stats['IQR_RMSD'][1]:.2f})",
+    ] + [f"{k}: {v:.1f}%" for k, v in global_stats.items() if k.startswith("pct_pairs_lt_")]
+    overlay_lines.append(f"Inter-cluster median = {inter_stats['median_inter']:.2f} Å")
+    for cid, st in cluster_stats.items():
+        overlay_lines.append(f"Cluster {cid} (n={st['size']}): median intra = {st['median_intra']:.2f} Å; "
+                             f"IQR {st['IQR_intra'][0]:.2f}–{st['IQR_intra'][1]:.2f}")
+    overlay_text = "\n".join(overlay_lines)
+
+    return {
+        "global": global_stats,
+        "clusters": cluster_stats,
+        "inter": inter_stats,
+        "labels": labels.tolist(),
+        "overlay_text": overlay_text,
+        "ref_like_top10": ref_like,
+        "outliers_top10": outliers,
+    }
+
+
+def _annotate_metrics_on_clustergrid(clustergrid, text: str, loc=(0.01, 0.99)):
+    """
+    clustergrid: seaborn ClusterGrid or object exposing .ax_heatmap
+    loc: axes fraction coordinates (x,y) for the top-left of the text box
+    """
+    ax = getattr(clustergrid, "ax_heatmap", None) or clustergrid  # support Figure fallback
+    ax.text(
+        loc[0], loc[1], text,
+        transform=ax.transAxes, ha="left", va="top",
+        fontsize=9, family="monospace",
+        bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="black", lw=0.8, alpha=0.85)
+    )
+
 def plot_rmsd_heatmap(rmsd_df, title="All-vs-All RMSD Heatmap"):
     """Visualize the RMSD matrix as a heatmap using the grayscale color scheme."""
     plt.figure(figsize=(10, 8))

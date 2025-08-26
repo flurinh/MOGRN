@@ -4,10 +4,10 @@ Generated on: 2025-06-20 12:29:52
 
 ## Dataset Overview
 
-- Total structures analyzed: 121
-- Experimental structures: 61
+- Total structures analyzed: 129
+- Experimental structures: 69
 - Predicted structures: 60
-- Structures with both function and domain annotations: 121
+- Structures with both function and domain annotations: 129
 
 ## Molecular Function Distribution
 

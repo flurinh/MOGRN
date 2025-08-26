@@ -20,6 +20,15 @@ from src.visualization_functions import create_and_visualize_similarity_tree, vi
 
 import matplotlib.pyplot as plt
 
+HELIX_RET_BANDS = {
+    1: (14.0, 17.8),
+    2: (14.0, 14.0),
+    3: (10.0, 11.0),
+    4: (7.5, 14.0),
+    5: (9.0, 13.0),
+    6: (8.0, 17.0),
+    7: (12.0, 13.0),
+}
 
 # Import retinal_utils
 try:
@@ -273,6 +282,86 @@ def compute_all_vs_all_rmsd_improved(structures, align_to=None, subset='CA', cha
 # calculate_min_distances, and compute_retinal_mean_closest_distance
 # are correctly defined and imported in your environment.
 
+def apply_retinal_distance_band_filter(
+    ca_df: pd.DataFrame,
+    retinal_df: pd.DataFrame,
+    bands: dict,
+    *,
+    helix_col: str = "helix_num",
+    seqid_col: str = "auth_seq_id",
+    atom_col: str = "res_atom_name",
+    atom_name: str = "CA",
+    margin: float = 1.5,
+    min_per_helix: int = 4,
+    min_total: int = 12
+):
+    """
+    Keep only CA residues per helix whose distance to RET falls within a helix-specific band.
+    - bands: {helix_idx: (low, high)} in Å. We'll auto-order low<=high and expand by ±margin.
+    - Distances are computed as min distance from CA to any RET atom (like your pocket def).
+    Returns: (filtered_df, stats_dict)
+    Falls back to original ca_df if filters would drop below min_total.
+    """
+    stats = {"kept_per_helix": {}, "dropped_per_helix": {}, "kept_total": 0, "dropped_total": 0, "used": False}
+
+    if ca_df.empty or retinal_df.empty or helix_col not in ca_df.columns:
+        # Nothing to do / no helix annotation / no RET → return unmodified
+        return ca_df, stats
+
+    # Ensure we work on CA only
+    x = ca_df[ca_df[atom_col].astype(str) == atom_name].copy()
+    if x.empty:
+        return ca_df, stats
+
+    # Precompute CA→RET distances (min to any RET atom)
+    ca_xyz = x[["x", "y", "z"]].astype(float).values
+    ret_xyz = retinal_df[["x", "y", "z"]].astype(float).values
+    dmin = calculate_min_distances(ca_xyz, ret_xyz)  # shape (N_ca,)
+    if not isinstance(dmin, np.ndarray):
+        dmin = np.array(dmin, dtype=float)
+    x["dist_to_ret"] = dmin
+
+    keep_mask = np.zeros(len(x), dtype=bool)
+    for h in range(1, 8):
+        h_mask = (x[helix_col] == h).values
+        if not h_mask.any():
+            continue
+        lo, hi = bands.get(h, (None, None))
+        if lo is None or hi is None:
+            # No band for this helix → keep all of its residues
+            keep_mask[h_mask] = True
+            stats["kept_per_helix"][h] = int(h_mask.sum())
+            stats["dropped_per_helix"][h] = 0
+            continue
+        # normalize band and expand with margin (handle narrow bands like 14–14)
+        lo, hi = (min(lo, hi), max(lo, hi))
+        lo -= margin
+        hi += margin
+        h_keep = h_mask & (x["dist_to_ret"].values >= lo) & (x["dist_to_ret"].values <= hi)
+
+        # enforce a minimum per helix; if too few, relax to keep all for that helix
+        if h_keep.sum() < min_per_helix:
+            h_keep = h_mask  # relax: keep all residues of this helix
+
+        keep_mask |= h_keep
+        stats["kept_per_helix"][h] = int((h_keep).sum())
+        stats["dropped_per_helix"][h] = int(h_mask.sum() - (h_keep).sum())
+
+    kept = x[keep_mask]
+    # If we ended up with too few residues overall, fall back
+    if len(kept) < min_total:
+        stats["kept_total"] = len(x)
+        stats["dropped_total"] = 0
+        stats["used"] = False
+        return ca_df, stats  # return original (unfiltered)
+
+    # Merge back any non-CA rows (you only align on CA, so not strictly needed here)
+    stats["kept_total"] = len(kept)
+    stats["dropped_total"] = int(len(x) - len(kept))
+    stats["used"] = True
+    return kept, stats
+
+
 def calculate_binding_pocket_rmsd_for_pairs(mapping_dict, exp_processor, pred_processor, pocket_def=None, cutoff=6.0,
                                             distance_cutoff=6.0, position_tolerance=2.0, window_size=20, max_gap=4,
                                             retinal_name='RET'):
@@ -388,6 +477,30 @@ def calculate_binding_pocket_rmsd_for_pairs(mapping_dict, exp_processor, pred_pr
         print(
             f"[INFO] Using {len(exp_ca_for_align_df)} CAs from exp and {len(pred_ca_for_align_df)} CAs from pred for CEalign input.")
 
+        try:
+            exp_ca_for_align_df_filt, exp_band_stats = apply_retinal_distance_band_filter(
+                exp_ca_for_align_df, exp_ret_df_step1, HELIX_RET_BANDS,
+                margin=1.5, min_per_helix=4, min_total=12
+            )
+            pred_ca_for_align_df_filt, pred_band_stats = apply_retinal_distance_band_filter(
+                pred_ca_for_align_df, pred_ret_df_step1, HELIX_RET_BANDS,
+                margin=1.5, min_per_helix=4, min_total=12
+            )
+
+            # Adopt filtered sets if both sides passed min_total; else keep originals
+            if exp_band_stats.get("used") and pred_band_stats.get("used"):
+                print(f"[INFO] Retinal-band filter applied: kept EXP {exp_band_stats['kept_total']} CAs "
+                      f"(dropped {exp_band_stats['dropped_total']}), "
+                      f"PRED {pred_band_stats['kept_total']} CAs (dropped {pred_band_stats['dropped_total']}).")
+                exp_ca_for_align_df = exp_ca_for_align_df_filt
+                pred_ca_for_align_df = pred_ca_for_align_df_filt
+            else:
+                print(
+                    "[INFO] Retinal-band filter skipped (insufficient residues after filtering on one or both sides).")
+        except Exception as e_band:
+            print(f"[WARN] Retinal-band filter failed; proceeding without it: {e_band}")
+
+        """
         # STEP 4: Align structures based on CA atoms
         try:
             exp_ca_coords_for_cealign = exp_ca_for_align_df[['x', 'y', 'z']].astype(float).values
@@ -450,6 +563,188 @@ def calculate_binding_pocket_rmsd_for_pairs(mapping_dict, exp_processor, pred_pr
 
             print(
                 f"[INFO] Mapped {len(experimental_pocket_auth_ids)} exp pocket residues to {len(pocket_residue_pairs)} pred pocket residues via alignment path.")
+        """
+
+
+        # =========================
+        # STEP 4: Align structures based on CA atoms  (two-pass with inlier filtering)
+        # =========================
+        try:
+            # --- STEP 4A: initial CEalign on all protein CAs (non-RET) ---
+            exp_ca_coords_for_cealign = exp_ca_for_align_df[['x', 'y', 'z']].astype(float).values
+            pred_ca_coords_for_cealign = pred_ca_for_align_df[['x', 'y', 'z']].astype(float).values
+
+            # Optional annotations (used for filtering / ordering)
+            exp_ca_seqids = exp_ca_for_align_df[
+                'auth_seq_id'].values if 'auth_seq_id' in exp_ca_for_align_df.columns else np.arange(
+                len(exp_ca_for_align_df))
+            pred_ca_seqids = pred_ca_for_align_df[
+                'auth_seq_id'].values if 'auth_seq_id' in pred_ca_for_align_df.columns else np.arange(
+                len(pred_ca_for_align_df))
+            exp_ca_helix = exp_ca_for_align_df[
+                'helix_num'].values if 'helix_num' in exp_ca_for_align_df.columns else None
+            pred_ca_helix = pred_ca_for_align_df[
+                'helix_num'].values if 'helix_num' in pred_ca_for_align_df.columns else None
+
+            # Parameters for refinement
+            INLIER_THRESH = 3.0  # Å, residual cutoff
+            MIN_INLIERS = 12  # minimum pairs to proceed with refinement
+            ENFORCE_SAME_HELIX = True  # only pair Hk↔Hk when helix_num present
+
+            # CEalign pass 1
+            R1, t1, alignment_path_indices_1, overall_ca_rmsd_1 = get_structure_alignment(
+                exp_ca_coords_for_cealign, pred_ca_coords_for_cealign,
+                window_size=8, max_gap=30
+            )
+            print(f"[INFO] Pass-1 (CEalign) CA RMSD: {overall_ca_rmsd_1:.3f} Å")
+
+            # If path invalid/empty, fall back to single-pass logic
+            if not (alignment_path_indices_1 and len(alignment_path_indices_1) == 2 and
+                    len(alignment_path_indices_1[0]) > 0 and len(alignment_path_indices_1[1]) > 0):
+                print(
+                    f"[WARNING] CEalign (pass-1) returned empty/invalid path for {exp_id} <-> {pred_id}; using single-pass alignment.")
+                R_use, t_use = R1, t1
+                alignment_path_indices = alignment_path_indices_1
+                overall_ca_rmsd = overall_ca_rmsd_1
+            else:
+                exp_idx_1, pred_idx_1 = alignment_path_indices_1
+
+                # --- STEP 4B: analyze residuals on pass-1 path; build inlier set ---
+                # IMPORTANT: keep residual computation consistent with the transform you apply later.
+                # Your pipeline applies R,t to PRED to bring it into EXP frame, so compute residuals the same way:
+                pred_aligned_p1 = np.dot(pred_ca_coords_for_cealign, R1) + t1  # shape (Npred, 3)
+
+                # residual per matched pair
+                residuals = []
+                inlier_pairs = []
+                for ii, jj in zip(exp_idx_1, pred_idx_1):
+                    if ii >= len(exp_ca_coords_for_cealign) or jj >= len(pred_aligned_p1):
+                        continue
+                    d = np.linalg.norm(exp_ca_coords_for_cealign[ii] - pred_aligned_p1[jj])
+                    # optional same-helix constraint when available
+                    if ENFORCE_SAME_HELIX and (exp_ca_helix is not None) and (pred_ca_helix is not None):
+                        if ii < len(exp_ca_helix) and jj < len(pred_ca_helix):
+                            if not (exp_ca_helix[ii] == pred_ca_helix[jj]):
+                                continue
+                    residuals.append(d)
+                    if d <= INLIER_THRESH:
+                        inlier_pairs.append((ii, jj))
+
+                n_total_for_coverage = max(len(exp_ca_coords_for_cealign), len(pred_ca_coords_for_cealign))
+                coverage_inliers = (len(inlier_pairs) / float(n_total_for_coverage)) if n_total_for_coverage else 0.0
+                print(
+                    f"[INFO] Pass-1 inliers: {len(inlier_pairs)} (coverage {coverage_inliers:.2f}) with τ={INLIER_THRESH:.1f} Å; same-helix={ENFORCE_SAME_HELIX}")
+
+                # If insufficient inliers, skip refinement and use pass-1
+                if len(inlier_pairs) < MIN_INLIERS:
+                    print(f"[WARN] Not enough inliers (<{MIN_INLIERS}) for refinement; using pass-1 result.")
+                    R_use, t_use = R1, t1
+                    alignment_path_indices = alignment_path_indices_1
+                    overall_ca_rmsd = overall_ca_rmsd_1
+                else:
+                    # Build filtered, CONTIGUOUS arrays (sort by helix then seqid to keep CE DP happy)
+                    def sort_key(pair):
+                        ii, jj = pair
+                        h = exp_ca_helix[ii] if exp_ca_helix is not None else 0
+                        s = exp_ca_seqids[ii] if exp_ca_seqids is not None else ii
+                        return (h, s)
+
+                    inlier_pairs_sorted = sorted(inlier_pairs, key=sort_key)
+                    exp_inlier_idx = np.array([ii for ii, _ in inlier_pairs_sorted], dtype=int)
+                    pred_inlier_idx = np.array([jj for _, jj in inlier_pairs_sorted], dtype=int)
+
+                    exp_coords_filt = exp_ca_coords_for_cealign[exp_inlier_idx]
+                    pred_coords_filt = pred_ca_coords_for_cealign[pred_inlier_idx]
+
+                    # --- STEP 4C: CEalign pass-2 on filtered inputs ---
+                    try:
+                        R2, t2, alignment_path_indices_2, overall_ca_rmsd_2 = get_structure_alignment(
+                            exp_coords_filt, pred_coords_filt,
+                            window_size=8, max_gap=30
+                        )
+                        print(
+                            f"[INFO] Pass-2 (refined) CA RMSD: {overall_ca_rmsd_2:.3f} Å on {len(exp_coords_filt)} filtered CAs")
+
+                        # Map refined path back to ORIGINAL exp/pred CA indices
+                        if alignment_path_indices_2 and len(alignment_path_indices_2) == 2 and \
+                                len(alignment_path_indices_2[0]) > 0 and len(alignment_path_indices_2[1]) > 0:
+                            exp_idx_2_rel, pred_idx_2_rel = alignment_path_indices_2
+                            # indices into filtered arrays -> map back to global
+                            exp_idx_2_global = [int(exp_inlier_idx[k]) for k in exp_idx_2_rel]
+                            pred_idx_2_global = [int(pred_inlier_idx[k]) for k in pred_idx_2_rel]
+                            alignment_path_indices = (exp_idx_2_global, pred_idx_2_global)
+                            R_use, t_use = R2, t2
+                            overall_ca_rmsd = overall_ca_rmsd_2
+                        else:
+                            print(f"[WARN] Pass-2 returned empty/invalid path; falling back to pass-1.")
+                            R_use, t_use = R1, t1
+                            alignment_path_indices = alignment_path_indices_1
+                            overall_ca_rmsd = overall_ca_rmsd_1
+                    except Exception as e_ref:
+                        print(f"[WARN] Pass-2 CEalign failed for {exp_id} <-> {pred_id}: {e_ref}; using pass-1 result.")
+                        R_use, t_use = R1, t1
+                        alignment_path_indices = alignment_path_indices_1
+                        overall_ca_rmsd = overall_ca_rmsd_1
+
+            # From here onward, use (R_use, t_use) and the chosen alignment_path_indices
+            print(
+                f"[INFO] Using CA RMSD = {overall_ca_rmsd:.3f} Å (two-pass {'refined' if (alignment_path_indices != alignment_path_indices_1) else 'initial'})")
+
+            # Apply FINAL transform ONCE to the pocket dataframe (as in your original logic)
+            pred_all_atom_coords_original_for_pocket = pred_df_for_pocket_alignment[['x', 'y', 'z']].values.astype(
+                float)
+            pred_df_for_pocket_alignment[['x', 'y', 'z']] = np.dot(pred_all_atom_coords_original_for_pocket,
+                                                                   R_use) + t_use
+
+            # --- Map experimental pocket residues to predicted ones using the (possibly refined) CE path ---
+            pocket_residue_pairs = []
+            if alignment_path_indices and len(alignment_path_indices) == 2 and \
+                    len(alignment_path_indices[0]) > 0 and len(alignment_path_indices[1]) > 0:
+                exp_path_indices, pred_path_indices = alignment_path_indices
+
+                mapped_exp_pocket_ids_in_path = set()
+                for exp_pocket_auth_id_current in experimental_pocket_auth_ids:
+                    if exp_pocket_auth_id_current in mapped_exp_pocket_ids_in_path:
+                        continue
+                    # scan the CE path for this exp residue (by auth_seq_id)
+                    for k in range(len(exp_path_indices)):
+                        exp_ca_path_idx = exp_path_indices[k]
+                        if exp_ca_path_idx < len(exp_ca_for_align_df):
+                            auth_id_of_exp_ca_in_path = exp_ca_for_align_df.iloc[exp_ca_path_idx]['auth_seq_id']
+                            if auth_id_of_exp_ca_in_path == exp_pocket_auth_id_current:
+                                pred_ca_path_idx = pred_path_indices[k]
+                                if pred_ca_path_idx < len(pred_ca_for_align_df):
+                                    auth_id_of_pred_ca_in_path = pred_ca_for_align_df.iloc[pred_ca_path_idx][
+                                        'auth_seq_id']
+                                    pocket_residue_pairs.append({
+                                        'exp_auth_id': exp_pocket_auth_id_current,
+                                        'pred_auth_id': auth_id_of_pred_ca_in_path
+                                    })
+                                    mapped_exp_pocket_ids_in_path.add(exp_pocket_auth_id_current)
+                                    break
+            else:
+                print(
+                    f"[WARNING] CEalign did not return a valid or non-empty path for {exp_id} <-> {pred_id} (after two-pass).")
+
+            # Uniquify residue pairs
+            if pocket_residue_pairs:
+                unique_pairs_tuples = sorted(list(set(
+                    (pair['exp_auth_id'], pair['pred_auth_id']) for pair in pocket_residue_pairs
+                )))
+                pocket_residue_pairs = [{'exp_auth_id': ep[0], 'pred_auth_id': ep[1]} for ep in unique_pairs_tuples]
+
+            print(f"[INFO] Mapped {len(experimental_pocket_auth_ids)} exp-pocket residues to "
+                  f"{len(pocket_residue_pairs)} pred-pocket residues via CE path (two-pass).")
+
+        except RuntimeError as re:
+            print(f"[ERROR] Alignment runtime error for {exp_id} <-> {pred_id}: {str(re)}")
+            results[exp_id] = {'error': f'Alignment failed: {str(re)}'}
+            continue
+        except Exception as e:
+            import traceback
+            print(f"[ERROR] Failed during alignment step for {exp_id} and {pred_id}: {str(e)}")
+            traceback.print_exc()
+            results[exp_id] = {'error': f'Processing failed (alignment): {str(e)}'}
 
             # STEP 5: Calculate binding pocket RMSD using mapped pairs and transformed pred_df_for_pocket_alignment
             pocket_rmsd_sum_sq = 0  # Changed from pocket_rmsd_sum to reflect squared sum
@@ -525,7 +820,7 @@ def calculate_binding_pocket_rmsd_for_pairs(mapping_dict, exp_processor, pred_pr
             retinal_rmsd = np.nan  # Initialize
             if exp_ret_coords.shape[0] > 0 and pred_ret_coords_original_untransformed.shape[0] > 0:
                 # Apply the global R and t (from CA alignment) to these specific original predicted retinal coordinates
-                aligned_pred_ret_coords_for_rmsd = np.dot(pred_ret_coords_original_untransformed, R) + t
+                aligned_pred_ret_coords_for_rmsd = np.dot(pred_ret_coords_original_untransformed, R_use) + t_use
 
                 try:
                     retinal_rmsd = compute_retinal_mean_closest_distance(
@@ -551,8 +846,8 @@ def calculate_binding_pocket_rmsd_for_pairs(mapping_dict, exp_processor, pred_pr
                 'experimental_pocket_auth_ids': experimental_pocket_auth_ids,
                 'mapped_pocket_residue_pairs': pocket_residue_pairs,
                 'alignment': {
-                    'rotation': R.tolist(),
-                    'translation': t.tolist(),
+                    'rotation': R_use.tolist(),
+                    'translation': t_use.tolist(),
                     'cealign_path_indices': {
                         'exp_indices': alignment_path_indices[0].tolist() if alignment_path_indices and isinstance(
                             alignment_path_indices[0], np.ndarray) else (

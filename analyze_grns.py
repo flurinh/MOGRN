@@ -1689,7 +1689,7 @@ def main():
     )
     
     # Data input arguments
-    parser.add_argument('--residue-table', default='opsin_output/global_reference_grn/msa_table_grn.csv',
+    parser.add_argument('--residue-table', default='opsin_output/curated_grn.csv',
                        help='Path to residue table')
     parser.add_argument('--property-table', default='property/mo_exp.csv',
                        help='Path to property table')
