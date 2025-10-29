@@ -853,7 +853,7 @@ def main(args=None):
             print("\n[VISUALIZATION 9] Generating Interactive GRN Alignment Visualization...")
             # Import the interactive visualization module
             
-            interactive_output = FIGURES_OUTPUT_DIR / 'interactive_grn_alignment.html'
+            interactive_output = FIGURES_OUTPUT_DIR / 'interactive_grn_alignment.docs'
             fig_interactive = create_opsin_visualization_from_workflow(
                 cache_dir=str(CACHE_DIR),
                 property_file=str(property_csv_path),

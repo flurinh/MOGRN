@@ -1558,7 +1558,7 @@ def create_interactive_opsin_visualization(
 def create_opsin_visualization_from_workflow(
     cache_dir="opsin_output/cache",
     property_file="property/mo_exp.csv", 
-    output_file="opsin_output/interactive_grn_alignment_3d.html",
+    output_file="opsin_output/interactive_grn_alignment_3d.docs",
     reference_id='MerMAID1_model_0',
     **viz_kwargs
 ):

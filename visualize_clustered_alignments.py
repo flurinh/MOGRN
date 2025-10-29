@@ -205,7 +205,7 @@ def visualize_single_alignment(clustered_id, best_match_id, clustered_struct, pr
     )
     
     # Save as interactive HTML
-    html_file = output_dir / f"alignment_{clustered_id}_to_{best_match_id}.html"
+    html_file = output_dir / f"alignment_{clustered_id}_to_{best_match_id}.docs"
     fig.write_html(str(html_file))
     
     # Save as static image
@@ -403,7 +403,7 @@ def main():
             col=(i-1)%3 + 1
         )
     
-    fig.write_html(str(output_dir / "top_alignments_grid.html"))
+    fig.write_html(str(output_dir / "top_alignments_grid.docs"))
     fig.write_image(str(output_dir / "top_alignments_grid.png"))
     
     print(f"\nVisualizations saved to: {output_dir}")
