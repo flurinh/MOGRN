@@ -194,12 +194,12 @@ Channels: C3.50 + G5.50 + T4.50 → Flexible gating, ion selectivity
 
 ```bash
 # Custom figure directories
-python plot.py --input-dir custom_output --output-dir custom_figures
+python plot.py --input-dir custom_output --outputs-dir custom_figures
 
 # Specific plot types
 python plot.py --plots "rmsd,conservation,distance"
 
-# High DPI output
+# High DPI outputs
 python plot.py --dpi 600
 ```
 

@@ -101,7 +101,7 @@ def find_retinal_within_cutoff(full_structure_df, chain_df, cutoff=6.0, retinal_
     ret_mask = (full_structure_df['res_name3l'] == retinal_name) | (full_structure_df['res_name3l'] == 'LIG') | (full_structure_df['res_name3l'] == 'LYR')
     ret_df = full_structure_df[ret_mask].copy()
     
-    # Minimal debug output for retinal search
+    # Minimal debug outputs for retinal search
     if not ret_df.empty:
         res_types = ret_df['res_name3l'].unique()
         

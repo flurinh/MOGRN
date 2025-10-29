@@ -127,7 +127,7 @@ def make_rmsd_table(binding_pocket_results):
     return df
 
 
-def calculate_structure_errors(data_dict, output_dir='output', visualize=True):
+def calculate_structure_errors(data_dict, output_dir='outputs', visualize=True):
     """
     Step 2: Calculate errors between experimental and predicted structures
 
@@ -136,7 +136,7 @@ def calculate_structure_errors(data_dict, output_dir='output', visualize=True):
 
     Args:
         data_dict: Dictionary with data from previous step
-        output_dir: Directory to save output files
+        output_dir: Directory to save outputs files
         visualize: Whether to generate visualizations
 
     Returns:
@@ -144,7 +144,7 @@ def calculate_structure_errors(data_dict, output_dir='output', visualize=True):
     """
     print("\n=== Step 2: Error Calculation ===")
 
-    # Create output directory if it doesn't exist
+    # Create outputs directory if it doesn't exist
     os.makedirs(output_dir, exist_ok=True)
 
     # Unpack necessary data

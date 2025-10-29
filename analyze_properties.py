@@ -497,7 +497,7 @@ def main():
                        help='Path to property CSV file')
     parser.add_argument('--grn-table', type=Path, default=Path('opsin_output/global_reference_grn/msa_table_grn.csv'),
                        help='Path to GRN table (optional, for filtering structures)')
-    parser.add_argument('--output-dir', type=Path, default=Path('property_analysis'),
+    parser.add_argument('--outputs-dir', type=Path, default=Path('property_analysis'),
                        help='Output directory for results')
     parser.add_argument('--no-grn', action='store_true',
                        help='Analyze all properties without GRN table filtering')

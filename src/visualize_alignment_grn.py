@@ -13,13 +13,24 @@ from plotly import colors
 import os
 from pathlib import Path
 from sklearn.decomposition import PCA
+from collections import Counter, defaultdict
 
 # Import protos for structure loading
 from protos.processing.structure.struct_base_processor import CifBaseProcessor
 from src.data_processing import load_experimental_dataset
 
 # Import helix color scheme
-from src.opsin_color_scheme import HELIX_NUMBER_COLORS
+from src.opsin_color_scheme import HELIX_NUMBER_COLORS, get_categorical_colors
+
+
+# Basic 3-letter to 1-letter amino acid mapping for hover text enrichment
+THREE_TO_ONE_AA = {
+    "ALA": "A", "ARG": "R", "ASN": "N", "ASP": "D", "CYS": "C",
+    "GLN": "Q", "GLU": "E", "GLY": "G", "HIS": "H", "ILE": "I",
+    "LEU": "L", "LYS": "K", "MET": "M", "PHE": "F", "PRO": "P",
+    "SER": "S", "THR": "T", "TRP": "W", "TYR": "Y", "VAL": "V",
+    "RET": "RET", "HOH": "HOH"  # Retinal and solvent placeholders
+}
 
 
 def load_rmsd_cache():
@@ -148,38 +159,78 @@ def extract_ca_coordinates_with_grn(processed_structures, grn_df, chain_id='A', 
                 grn_row = grn_df.loc[struct_id]
                 seq_to_grn = {}  # Maps auth_seq_id -> GRN position
                 grn_to_seq = {}  # Maps GRN position -> auth_seq_id
-                
+
                 for grn_pos, cell_value in grn_row.items():
                     amino_acid, seq_pos = parse_grn_residue(cell_value)
                     if amino_acid is not None and seq_pos is not None:
                         seq_to_grn[seq_pos] = grn_pos
                         grn_to_seq[grn_pos] = seq_pos
-                
+
                 # Add GRN column to CA data
                 ca_data_with_grn = ca_data.copy()
                 ca_data_with_grn['grn_position'] = ca_data_with_grn['auth_seq_id'].map(seq_to_grn)
-                ca_data_with_grn['grn'] = ca_data_with_grn['grn_position']  # Add 'grn' column for fast access
-                
+                ca_data_with_grn['grn'] = ca_data_with_grn['grn_position']  # Direct GRN access
+
+                # Enrich residue names for hover text
+                if 'res_name1l' not in ca_data_with_grn.columns:
+                    if 'res_name3l' in ca_data_with_grn.columns:
+                        ca_data_with_grn['res_name1l'] = (
+                            ca_data_with_grn['res_name3l']
+                            .astype(str)
+                            .str.upper()
+                            .map(THREE_TO_ONE_AA)
+                            .fillna('X')
+                        )
+                    else:
+                        ca_data_with_grn['res_name1l'] = 'X'
+                else:
+                    ca_data_with_grn['res_name1l'] = ca_data_with_grn['res_name1l'].fillna('X')
+
+                if 'res_name3l' not in ca_data_with_grn.columns:
+                    ca_data_with_grn['res_name3l'] = ca_data_with_grn['res_name1l'].map(
+                        {v: k for k, v in THREE_TO_ONE_AA.items() if len(v) == 1}
+                    ).fillna('UNK')
+
                 # Determine dataset type
                 dataset_type = 'predicted' if struct_id.endswith('_model_0') else 'experimental'
-                
+
                 # Add helix information (check if helix_num column exists in the filtered data)
                 if 'helix_num' in ca_data.columns:
                     ca_data_with_grn['helix_num'] = ca_data['helix_num'].fillna(0).astype(int)
                 else:
                     ca_data_with_grn['helix_num'] = 0  # Default to 0 for non-helix when column missing
-                
+
+                # Capture retinal atoms if available for downstream visualization
+                retinal_info = None
+                df_ret = struct_data.get('df_ret')
+                if isinstance(df_ret, pd.DataFrame) and not df_ret.empty:
+                    try:
+                        retinal_df = df_ret.copy()
+                        retinal_coords = retinal_df[['x', 'y', 'z']].astype(float).values
+                        retinal_info = {
+                            'coords': retinal_coords,
+                            'atom_names': retinal_df['atom_name'].astype(str).values,
+                            'res_name3l': retinal_df.get('res_name3l', pd.Series(['RET'] * len(retinal_df))).astype(str).values,
+                            'chain_ids': retinal_df.get('auth_chain_id', pd.Series([''] * len(retinal_df))).astype(str).values
+                        }
+                    except Exception as retina_exc:
+                        print(f"[WARN] Failed to capture retinal coordinates for {struct_id}: {retina_exc}")
+                        retinal_info = None
+
                 all_structures[struct_id] = {
                     'coords': ca_data_with_grn[['x', 'y', 'z']].astype(float).values,
                     'residues': ca_data_with_grn['auth_seq_id'].values,
                     'grn_positions': ca_data_with_grn['grn_position'].values,
                     'grn': ca_data_with_grn['grn'].values,  # Direct GRN access
                     'helix_numbers': ca_data_with_grn['helix_num'].values,
+                    'res_name1l': ca_data_with_grn['res_name1l'].values,
+                    'res_name3l': ca_data_with_grn['res_name3l'].values,
                     'dataset': dataset_type,
                     'structure_type': struct_data.get('structure_type', dataset_type),
                     'seq_to_grn': seq_to_grn,
                     'grn_to_seq': grn_to_seq,
-                    'dataframe': ca_data_with_grn  # Store the full dataframe for efficient access
+                    'dataframe': ca_data_with_grn,  # Store the full dataframe for efficient access
+                    'retinal': retinal_info
                 }
             else:
                 print(f"Warning: No CA atoms found for {struct_id} after filtering")
@@ -204,6 +255,14 @@ def apply_alignment_transformations(structures, alignment_paths, reference_id='M
     # Reference structure (no transformation needed)
     aligned_structures[reference_id] = structures[reference_id].copy()
     aligned_structures[reference_id]['is_reference'] = True
+    if structures[reference_id].get('retinal'):
+        ref_retinal = structures[reference_id]['retinal']
+        aligned_structures[reference_id]['retinal'] = {
+            'coords': ref_retinal['coords'].copy(),
+            'atom_names': ref_retinal['atom_names'].copy(),
+            'res_name3l': ref_retinal['res_name3l'].copy(),
+            'chain_ids': ref_retinal['chain_ids'].copy()
+        }
     
     # Transform all other structures to align with the reference
     for struct_id in structures:
@@ -237,24 +296,49 @@ def apply_alignment_transformations(structures, alignment_paths, reference_id='M
         
         # Apply transformation to align structure to reference frame
         if R is not None and t is not None:
-            # Method 3: Apply full transformation, then recenter to match reference
+            # Method 3: Apply full transformation, then recenter to match the reference
             coords_transformed = np.dot(structures[struct_id]['coords'], R) + t
-            
+
             # Recenter the transformed coordinates to match the reference structure center
             ref_center = np.mean(aligned_structures[reference_id]['coords'], axis=0)
             transformed_center = np.mean(coords_transformed, axis=0)
             coords_transformed = coords_transformed - transformed_center + ref_center
-            
+
             # Copy structure data and update coordinates
             aligned_structures[struct_id] = structures[struct_id].copy()
             aligned_structures[struct_id]['coords'] = coords_transformed
             aligned_structures[struct_id]['is_reference'] = False
+
+            # Apply same transformation to retinal coordinates if available
+            if structures[struct_id].get('retinal'):
+                retinal_data = structures[struct_id]['retinal']
+                retinal_coords = np.dot(retinal_data['coords'], R) + t
+                retinal_coords = retinal_coords - transformed_center + ref_center
+                aligned_structures[struct_id]['retinal'] = {
+                    'coords': retinal_coords,
+                    'atom_names': retinal_data['atom_names'].copy(),
+                    'res_name3l': retinal_data['res_name3l'].copy(),
+                    'chain_ids': retinal_data['chain_ids'].copy()
+                }
+            else:
+                aligned_structures[struct_id]['retinal'] = None
+
             print(f"Successfully transformed {struct_id} to reference frame")
         else:
             print(f"Failed to get transformation matrices for {struct_id}")
             aligned_structures[struct_id] = structures[struct_id].copy()
             aligned_structures[struct_id]['is_reference'] = False
-    
+            if structures[struct_id].get('retinal'):
+                retinal_data = structures[struct_id]['retinal']
+                aligned_structures[struct_id]['retinal'] = {
+                    'coords': retinal_data['coords'].copy(),
+                    'atom_names': retinal_data['atom_names'].copy(),
+                    'res_name3l': retinal_data['res_name3l'].copy(),
+                    'chain_ids': retinal_data['chain_ids'].copy()
+                }
+            else:
+                aligned_structures[struct_id]['retinal'] = None
+
     print(f"Aligned {len(aligned_structures)-1} structures to reference {reference_id}")
     return aligned_structures
 
@@ -515,7 +599,7 @@ def apply_membrane_orientation(aligned_structures, reference_id='MerMAID1_model_
     for struct_id, struct_data in aligned_structures.items():
         # Copy structure data
         oriented_structures[struct_id] = struct_data.copy()
-        
+
         # Apply membrane orientation rotation
         original_coords = struct_data['coords']
         
@@ -537,9 +621,24 @@ def apply_membrane_orientation(aligned_structures, reference_id='MerMAID1_model_
         
         # Update coordinates
         oriented_structures[struct_id]['coords'] = oriented_coords
-        
+
+        # Rotate retinal coordinates in tandem if available
+        retinal_data = struct_data.get('retinal')
+        if retinal_data and retinal_data.get('coords') is not None:
+            retinal_coords = retinal_data['coords']
+            retinal_centered = retinal_coords - coord_center
+            rotated_retinal = np.dot(retinal_centered, membrane_rotation.T) + coord_center
+            oriented_structures[struct_id]['retinal'] = {
+                'coords': rotated_retinal,
+                'atom_names': retinal_data['atom_names'].copy(),
+                'res_name3l': retinal_data['res_name3l'].copy(),
+                'chain_ids': retinal_data['chain_ids'].copy()
+            }
+        elif retinal_data is not None:
+            oriented_structures[struct_id]['retinal'] = None
+
         print(f"Applied membrane orientation to {struct_id}")
-    
+
     print(f"Applied membrane orientation to {len(oriented_structures)} structures")
     return oriented_structures
 
@@ -567,7 +666,7 @@ def calculate_residue_distribution(aligned_structures, grn_df, target_grn):
     return residue_counts, total_count
 
 
-def create_residue_distribution_table(residue_counts, total_count, target_grn):
+def create_residue_distribution_table(residue_counts, total_count, target_grn, highlight_amino_acid=None):
     """Create a table showing residue distribution"""
     if total_count == 0:
         return go.Table(
@@ -583,7 +682,7 @@ def create_residue_distribution_table(residue_counts, total_count, target_grn):
     residues = [item[0] for item in sorted_residues]
     counts = [item[1] for item in sorted_residues]
     percentages = [f"{(count/total_count)*100:.1f}%" for count in counts]
-    
+
     # Color code by amino acid properties
     aa_colors = []
     for aa in residues:
@@ -599,7 +698,16 @@ def create_residue_distribution_table(residue_counts, total_count, target_grn):
             aa_colors.append('#F0E68C')  # Khaki
         else:
             aa_colors.append('#FFFFFF')  # White
-    
+
+    # Highlight selected amino acid row if requested
+    highlight_colors = ['white'] * len(counts)
+    if highlight_amino_acid and highlight_amino_acid in residues:
+        highlight_index = residues.index(highlight_amino_acid)
+        highlight_colors[highlight_index] = '#FFF2CC'  # Light yellow highlight
+    elif highlight_amino_acid and highlight_amino_acid != 'ALL' and highlight_amino_acid not in residues:
+        # Provide subtle cue when amino acid absent for this GRN
+        highlight_colors = ['#F8F8F8'] * len(counts)
+
     return go.Table(
         header=dict(
             values=[f"GRN {target_grn}", "Count", "%"], 
@@ -609,9 +717,51 @@ def create_residue_distribution_table(residue_counts, total_count, target_grn):
         ),
         cells=dict(
             values=[residues, counts, percentages], 
-            fill_color=[aa_colors, ['white']*len(counts), ['white']*len(counts)],
+            fill_color=[aa_colors, highlight_colors, highlight_colors],
             font=dict(size=11),
             height=20
+        )
+    )
+
+
+def create_structure_presence_table(structure_entries, target_grn, amino_acid):
+    """Create a table listing structures that carry the selected residue at the GRN position."""
+
+    header_title = f"GRN {target_grn} — {amino_acid if amino_acid and amino_acid != 'ALL' else 'Select residue'}"
+
+    if not structure_entries:
+        return go.Table(
+            header=dict(
+                values=[header_title],
+                fill_color='lightgray',
+                font=dict(size=12, color='black'),
+                height=25
+            ),
+            cells=dict(
+                values=[["No matching structures"]],
+                fill_color='white',
+                font=dict(size=11),
+                height=20
+            )
+        )
+
+    structure_entries = sorted(structure_entries, key=lambda item: (item.get('dataset', ''), item.get('structure')))
+    structures = [entry.get('structure', 'Unknown') for entry in structure_entries]
+    datasets = [entry.get('dataset', 'unknown') for entry in structure_entries]
+    functions = [entry.get('function', 'Unknown') for entry in structure_entries]
+
+    return go.Table(
+        header=dict(
+            values=[header_title, "Dataset", "Molecular Function"],
+            fill_color='lightgray',
+            font=dict(size=12, color='black'),
+            height=25
+        ),
+        cells=dict(
+            values=[structures, datasets, functions],
+            fill_color=[['white'] * len(structures)] * 3,
+            font=dict(size=10),
+            height=18
         )
     )
 
@@ -625,7 +775,11 @@ def create_interactive_opsin_visualization(
     height=1000,
     max_structures=125,
     membrane_opacity=0.05,
-    show_membrane=True
+    show_membrane=True,
+    include_retinal=False,
+    retinal_reference_id='MerMAID1_model_0',
+    hover_show_residue_name=False,
+    enable_amino_acid_filter=False
 ):
     """
     Create interactive 3D visualization of aligned opsin structures with dual coloring modes.
@@ -640,6 +794,10 @@ def create_interactive_opsin_visualization(
         max_structures (int): Maximum number of structures to display
         membrane_opacity (float): Opacity of membrane volume (0-1)
         show_membrane (bool): Whether to show membrane volume
+        include_retinal (bool): Add retinal atoms to the visualization (reference structure only)
+        retinal_reference_id (str): Structure ID whose retinal coordinates should be displayed
+        hover_show_residue_name (bool): Include amino-acid identity in residue hover text
+        enable_amino_acid_filter (bool): Enable per-amino-acid filtering and structure listings
         
     Returns:
         plotly.graph_objects.Figure: Interactive 3D visualization

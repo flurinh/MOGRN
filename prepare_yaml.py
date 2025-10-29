@@ -51,7 +51,7 @@ print("Sample of updated rows:")
 sample_rows = df[['opsin name', 'short_name', 'display_name']].head(5)
 print(sample_rows)
 
-# Create the output directory if it doesn't exist
+# Create the outputs directory if it doesn't exist
 os.makedirs('yaml_configs/mo_folding6', exist_ok=True)
 
 # Initialize YAML writer

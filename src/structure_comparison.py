@@ -56,7 +56,7 @@ def compute_all_vs_all_rmsd_improved(structures, align_to=None, subset='CA', cha
         chain_id: Chain ID to use
         tm_score_threshold: Minimum TM-score threshold for GTalign
         speed: Speed setting for GTalign (0-13, higher is faster but potentially less accurate)
-        verbose: Whether to print verbose output during alignment
+        verbose: Whether to print verbose outputs during alignment
         use_helix_only: Whether to use only residues from helices 1-7 for alignment (requires helix_num column)
         cache_dir: Directory to store/load cached RMSD results (if None, results won't be cached)
         force_recompute: If True, ignore cached results and recompute RMSD values
@@ -1103,7 +1103,7 @@ def create_mapping_for_rmsd_calculation(cp_mo_exp, cp_mo_pred, cp_hide_exp, cp_h
     return mapping
 
 
-def compare_structures(data_dict, output_dir='output', visualize=True):
+def compare_structures(data_dict, output_dir='outputs', visualize=True):
     """
     Step 5: Structure comparison
 
@@ -1115,7 +1115,7 @@ def compare_structures(data_dict, output_dir='output', visualize=True):
 
     Args:
         data_dict: Dictionary with data from previous steps
-        output_dir: Directory to save output files
+        output_dir: Directory to save outputs files
         visualize: Whether to generate visualizations
 
     Returns:

@@ -1,6 +1,7 @@
-import pandas as pd
 import os
+
 import matplotlib.pyplot as plt
+import pandas as pd
 
 from src.reference_alignment import (
     find_type_references,
@@ -21,8 +22,50 @@ from src.msa_grn import (
     generate_grn_msa_tables
 )
 
+from protos.processing.grn.grn_utils import (
+    ERROR_FLOAT,
+    parse_grn_str2float,
+    sort_grns_str,
+)
 
-def align_and_assign_grn(data_dict, output_dir='output', visualize=True, global_ref_override=None, helices_file='property/helices_curated.json'):
+
+def _sort_grn_dataframe(df: pd.DataFrame) -> pd.DataFrame:
+    if df is None or getattr(df, "columns", None) is None or len(df.columns) == 0:
+        return df
+
+    original_cols = list(df.columns)
+    col_strings = [str(col) for col in original_cols]
+    sorted_labels = sort_grns_str(col_strings)
+
+    float_lookup = {}
+    for col, col_str in zip(original_cols, col_strings):
+        float_val = parse_grn_str2float(col_str)
+        if abs(float_val - ERROR_FLOAT) < 1e-6:
+            continue
+        float_lookup.setdefault(float_val, []).append(col)
+
+    ordered_cols = []
+    used = set()
+
+    for label in sorted_labels:
+        target_float = parse_grn_str2float(label)
+        if abs(target_float - ERROR_FLOAT) < 1e-6:
+            continue
+        for candidate in float_lookup.get(target_float, []):
+            if candidate not in used:
+                ordered_cols.append(candidate)
+                used.add(candidate)
+                break
+
+    for col in original_cols:
+        if col not in used:
+            ordered_cols.append(col)
+            used.add(col)
+
+    return df.loc[:, ordered_cols]
+
+
+def align_and_assign_grn(data_dict, output_dir='outputs', visualize=True, global_ref_override=None, helices_file='property/helices_curated.json'):
     """
     Step 6: Structure alignment and GRN assignment
 
@@ -32,7 +75,7 @@ def align_and_assign_grn(data_dict, output_dir='output', visualize=True, global_
 
     Args:
         data_dict: Dictionary with data from previous steps
-        output_dir: Directory to save output files
+        output_dir: Directory to save outputs files
         visualize: Whether to generate visualizations
         global_ref_override: Optional override for global reference structure ID
         helices_file: Path to JSON file containing helix boundaries
@@ -142,10 +185,10 @@ def align_and_assign_grn(data_dict, output_dir='output', visualize=True, global_
         )
 
         # Extract tables
-        msa_df = tables["residue_table"]
-        distance_table = tables["distance_table"]
-        ca_msa_df = tables["ca_residue_table"]
-        ca_distance_table = tables["ca_distance_table"]
+        msa_df = _sort_grn_dataframe(tables["residue_table"])
+        distance_table = _sort_grn_dataframe(tables["distance_table"])
+        ca_msa_df = _sort_grn_dataframe(tables["ca_residue_table"])
+        ca_distance_table = _sort_grn_dataframe(tables["ca_distance_table"])
 
         # Report on any excluded structures
         if "excluded_structures" in tables and tables["excluded_structures"]:
@@ -249,7 +292,7 @@ def align_and_assign_grn(data_dict, output_dir='output', visualize=True, global_
         }
 
 
-def run_tree_based_alignment(data_dict, output_dir='output', visualize=True, method='weighted', helices_file='property/helices_curated.json'):
+def run_tree_based_alignment(data_dict, output_dir='outputs', visualize=True, method='weighted', helices_file='property/helices_curated.json'):
     """
     Run the tree-based alignment approach to generate alternative GRN assignments.
     
@@ -258,7 +301,7 @@ def run_tree_based_alignment(data_dict, output_dir='output', visualize=True, met
     
     Args:
         data_dict: Dictionary with data from previous steps
-        output_dir: Directory to save output files
+        output_dir: Directory to save outputs files
         visualize: Whether to generate visualizations
         method: Linkage method for hierarchical clustering ('weighted', 'average', 'single', 'complete', etc.)
                Default is 'weighted' (WPGMA) which gives equal weight to each object
@@ -306,10 +349,10 @@ def run_tree_based_alignment(data_dict, output_dir='output', visualize=True, met
         )
         
         # Extract tables
-        msa_df = tables["residue_table"]
-        distance_table = tables["distance_table"]
-        ca_msa_df = tables["ca_residue_table"]
-        ca_distance_table = tables["ca_distance_table"]
+        msa_df = _sort_grn_dataframe(tables["residue_table"])
+        distance_table = _sort_grn_dataframe(tables["distance_table"])
+        ca_msa_df = _sort_grn_dataframe(tables["ca_residue_table"])
+        ca_distance_table = _sort_grn_dataframe(tables["ca_distance_table"])
         
         # Report on any excluded structures
         if "excluded_structures" in tables and tables["excluded_structures"]:

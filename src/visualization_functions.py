@@ -2,9 +2,10 @@
 
 import os
 import matplotlib.pyplot as plt
-from matplotlib.colors import BoundaryNorm # ListedColormap not explicitly used if cmaps are strings
+from matplotlib.colors import BoundaryNorm, ListedColormap
 from collections import Counter
 from matplotlib.patches import Patch
+from matplotlib.lines import Line2D
 import matplotlib.gridspec as gridspec # For create_combined_distance_logo_plot
 
 import pandas as pd
@@ -576,7 +577,9 @@ def create_and_visualize_similarity_tree(rmsd_data, group_dict=None, domain_dict
 def visualize_rmsd_matrix_improved(rmsd_df, group_dict=None, name_dict=None,
                                    output_file=None, figsize=(16, 12),  # Adjusted for right legend panel
                                    domain_dict=None, linkage_matrix=None,
-                                   rmsd_vmin=0.0, rmsd_vmax=None):
+                                   rmsd_vmin=0.0, rmsd_vmax=None,
+                                   color_mode='continuous', step_cutoffs=None,
+                                   step_colors=None):
     """
     Clustermap with continuous white-to-dark_gray RMSD.
     Categorical property legends are at the top-right, with RMSD colorbar directly below them.
@@ -599,18 +602,19 @@ def visualize_rmsd_matrix_improved(rmsd_df, group_dict=None, name_dict=None,
 
     # --- Prepare Row Colors (Property 1) ---
     row_colors_series, row_legend_map = None, {}
-    prop1_name = 'Property 1'  # Consistent name for legend
+    prop1_name = 'Molecular Function'  # Legend title
     if group_dict:
         unique_prop1 = sorted(
             list(set(str(group_dict.get(id_val, 'Unknown')) for id_val in ordered_ids_for_legend_cats)))
         row_legend_map = get_categorical_colors(unique_prop1, property_type='property1')
-        colors_row = [row_legend_map.get(str(group_dict.get(id_val, 'Unknown')), OPSIN_COLORS['gray_3_light']) for
-                      id_val in rmsd_df.index]
-        row_colors_series = pd.Series(colors_row, index=rmsd_df.index, name=prop1_name)
+        colors_row = [row_legend_map.get(str(group_dict.get(id_val, 'Unknown')), OPSIN_COLORS['gray_3_light'])
+                      for id_val in rmsd_df.index]
+        row_colors_series = pd.Series(colors_row, index=rmsd_df.index)
+        row_colors_series.name = None
 
     # --- Prepare Column Colors (Property 2) ---
     col_colors_series, col_legend_map = None, {}
-    prop2_name = 'Property 2'  # Consistent name for legend
+    prop2_name = 'Source'  # Legend title
     if domain_dict:
         prop2_vals = [str(domain_dict.get(id_val, {}).get('domain', domain_dict.get(id_val, "Unknown"))) for id_val in
                       ordered_ids_for_legend_cats]
@@ -621,9 +625,10 @@ def visualize_rmsd_matrix_improved(rmsd_df, group_dict=None, name_dict=None,
             info = domain_dict.get(id_val, "Unknown")
             val_str = str(info.get('domain', info)) if isinstance(info, dict) else str(info)
             colors_col.append(col_legend_map.get(val_str, OPSIN_COLORS['gray_3_light']))
-        col_colors_series = pd.Series(colors_col, index=rmsd_df.index, name=prop2_name)
+        col_colors_series = pd.Series(colors_col, index=rmsd_df.index)
+        col_colors_series.name = None
     elif group_dict and row_colors_series is not None:  # Fallback
-        col_colors_series = row_colors_series.rename(prop1_name)  # Use same name if it's the same property
+        col_colors_series = row_colors_series.copy()
         col_legend_map = row_legend_map
 
     # --- Determine vmin and vmax for RMSD heatmap ---
@@ -636,6 +641,49 @@ def visualize_rmsd_matrix_improved(rmsd_df, group_dict=None, name_dict=None,
             rmsd_vmax = 3.0
     if rmsd_vmin is None: rmsd_vmin = 0.0
 
+    # --- Configure colormap / normalization ---
+    cmap = 'opsin_rmsd_white_to_darkgray'
+    norm = None
+    step_tick_positions = []
+    step_tick_labels = []
+
+    if color_mode not in {'continuous', 'step'}:
+        raise ValueError("color_mode must be 'continuous' or 'step'")
+
+    if color_mode == 'step':
+        step_cutoffs = step_cutoffs or [0.5, 1.5, 2.5]
+        if sorted(step_cutoffs) != step_cutoffs:
+            raise ValueError("step_cutoffs must be in ascending order")
+        if step_colors is None:
+            step_colors = [
+                OPSIN_COLORS['gray_1_white'],
+                OPSIN_COLORS['gray_3_light'],
+                OPSIN_COLORS['gray_6_dark_mid'],
+                OPSIN_COLORS['gray_9_black']
+            ]
+        num_bins = len(step_colors)
+        if num_bins != len(step_cutoffs) + 1:
+            raise ValueError("step_colors must have exactly one more entry than step_cutoffs")
+        upper_bound = max(rmsd_vmax, step_cutoffs[-1] + 0.5)
+        boundaries = [rmsd_vmin] + step_cutoffs + [upper_bound]
+        norm = BoundaryNorm(boundaries, num_bins, clip=True)
+        cmap = ListedColormap(step_colors)
+        rmsd_vmax = upper_bound
+        cbar_tick_centers = [(low + high) / 2 for low, high in zip(boundaries[:-1], boundaries[1:])]
+        step_tick_positions = cbar_tick_centers
+        label_segments = []
+        for idx, center in enumerate(cbar_tick_centers):
+            if idx == 0:
+                label_segments.append(f"≤{step_cutoffs[0]:.1f}")
+            elif idx == len(cbar_tick_centers) - 1:
+                label_segments.append(f">{step_cutoffs[-1]:.1f}")
+            else:
+                label_segments.append(f"{step_cutoffs[idx-1]:.1f}–{step_cutoffs[idx]:.1f}")
+        step_tick_labels = label_segments
+        cbar_kws = {'label': 'RMSD (Å)', 'ticks': step_tick_positions}
+    else:
+        cbar_kws = {'label': 'RMSD (Å)', 'format': '%.1f'}
+
     # --- Generate Clustermap ---
     try:
         g = sns.clustermap(
@@ -644,14 +692,52 @@ def visualize_rmsd_matrix_improved(rmsd_df, group_dict=None, name_dict=None,
             row_colors=row_colors_series, col_colors=col_colors_series,
             xticklabels=False, yticklabels=False,
             figsize=figsize,
-            cmap='opsin_rmsd_white_to_darkgray',
+            cmap=cmap,
             standard_scale=None,
             vmin=rmsd_vmin, vmax=rmsd_vmax,
-            cbar_kws={'label': 'RMSD (Å)', 'format': '%.1f'},
+            norm=norm,
+            cbar_kws=cbar_kws,
             dendrogram_ratio=(0.12, 0.12)
         )
 
         g.fig.suptitle("Structure Similarity Clustermap (RMSD)", fontsize=16)  # y default is fine
+
+        # --- Introduce subtle gap between property bars/dendrograms and heatmap ---
+        gap_main = 0.008
+        gap_vertical = 0.008
+
+        if hasattr(g, 'ax_heatmap') and g.ax_heatmap is not None:
+            heatmap_pos = list(g.ax_heatmap.get_position().bounds)
+            gap_x = min(gap_main, heatmap_pos[2] * 0.2)
+            gap_y = min(gap_vertical, heatmap_pos[3] * 0.2)
+            heatmap_pos[0] += gap_x
+            heatmap_pos[2] -= gap_x
+            heatmap_pos[3] -= gap_y
+            g.ax_heatmap.set_position(heatmap_pos)
+
+        if hasattr(g, 'ax_row_dendrogram') and g.ax_row_dendrogram is not None:
+            rd_pos = list(g.ax_row_dendrogram.get_position().bounds)
+            rd_gap = min(gap_main * 0.6, rd_pos[2] * 0.5)
+            rd_pos[2] -= rd_gap
+            g.ax_row_dendrogram.set_position(rd_pos)
+
+        if hasattr(g, 'ax_row_colors') and g.ax_row_colors is not None:
+            rc_pos = list(g.ax_row_colors.get_position().bounds)
+            rc_gap = min(gap_main * 0.6, rc_pos[2] * 0.5)
+            rc_pos[2] -= rc_gap
+            g.ax_row_colors.set_position(rc_pos)
+
+        if hasattr(g, 'ax_col_dendrogram') and g.ax_col_dendrogram is not None:
+            cd_pos = list(g.ax_col_dendrogram.get_position().bounds)
+            cd_gap = min(gap_vertical * 0.6, cd_pos[3] * 0.5)
+            cd_pos[3] -= cd_gap
+            g.ax_col_dendrogram.set_position(cd_pos)
+
+        if hasattr(g, 'ax_col_colors') and g.ax_col_colors is not None:
+            cc_pos = list(g.ax_col_colors.get_position().bounds)
+            cc_gap = min(gap_vertical * 0.6, cc_pos[3] * 0.5)
+            cc_pos[3] -= cc_gap
+            g.ax_col_colors.set_position(cc_pos)
 
         # --- Remove Names from Property Color Bars ---
         if hasattr(g, 'ax_row_colors') and g.ax_row_colors is not None:
@@ -673,89 +759,87 @@ def visualize_rmsd_matrix_improved(rmsd_df, group_dict=None, name_dict=None,
         legend_panel_width = 0.97 - legend_panel_left  # Width of legend panel (up to fig edge)
         legend_panel_height = 0.75  # Height of legend panel (adjust as needed, relative to suptitle and bottom)
 
-        # --- Create Axes for Categorical Legends (Top part of legend panel) ---
-        handles_cat, labels_cat, title_parts_cat = [], [], []
-        # ... (Populate handles_cat, labels_cat, title_parts_cat - same logic as before) ...
+        # --- Build separate legends for Molecular Function and Source ---
+        handles_prop1 = []
         if row_colors_series is not None and row_legend_map:
             for name, color in sorted(row_legend_map.items()):
-                if name != "Unknown": handles_cat.append(
-                    Patch(facecolor=color, edgecolor=OPSIN_COLORS['gray_7_dark'], label=name)); labels_cat.append(name)
-            if row_colors_series.name: title_parts_cat.append(row_colors_series.name)
-        if col_colors_series is not None and col_legend_map and \
-                (
-                        row_colors_series is None or col_colors_series.name != row_colors_series.name or domain_dict is not None):
-            if handles_cat: handles_cat.append(Patch(facecolor='none', edgecolor='none', label="")); labels_cat.append(
-                "")
+                if name == "Unknown":
+                    continue
+                handles_prop1.append(Patch(facecolor=color, edgecolor=OPSIN_COLORS['gray_7_dark'], label=name))
+            if "Unknown" in row_legend_map:
+                handles_prop1.append(Patch(facecolor=row_legend_map["Unknown"],
+                                           edgecolor=OPSIN_COLORS['gray_7_dark'],
+                                           label="Others"))
+
+        handles_prop2 = []
+        if col_colors_series is not None and col_legend_map:
             for name, color in sorted(col_legend_map.items()):
-                if name != "Unknown": handles_cat.append(
-                    Patch(facecolor=color, edgecolor=OPSIN_COLORS['gray_7_dark'], label=name)); labels_cat.append(name)
-            if col_colors_series.name: title_parts_cat.append(col_colors_series.name)
-        unknown_color = OPSIN_COLORS['gray_3_light']
-        unknown_p1_present = "Unknown" in row_legend_map and (
-                    row_colors_series is not None and any(row_colors_series == row_legend_map["Unknown"]))
-        unknown_p2_present = "Unknown" in col_legend_map and (
-                    col_colors_series is not None and any(col_colors_series == col_legend_map["Unknown"]))
-        if handles_cat and (unknown_p1_present or unknown_p2_present):
-            handles_cat.append(Patch(facecolor='none', edgecolor='none', label=""));
-            labels_cat.append("")
-        if unknown_p1_present:
-            handles_cat.append(Patch(facecolor=row_legend_map["Unknown"], edgecolor=OPSIN_COLORS['gray_7_dark'],
-                                     label="Unknown " + prop1_name));
-            labels_cat.append("Unknown " + prop1_name)
-        if unknown_p2_present and (not group_dict or not unknown_p1_present or (
-                col_colors_series is not None and row_colors_series is not None and col_colors_series.name != row_colors_series.name) or domain_dict is not None):
-            handles_cat.append(Patch(facecolor=col_legend_map["Unknown"], edgecolor=OPSIN_COLORS['gray_7_dark'],
-                                     label="Unknown " + prop2_name));
-            labels_cat.append("Unknown " + prop2_name)
+                if name == "Unknown":
+                    continue
+                handles_prop2.append(Patch(facecolor=color, edgecolor=OPSIN_COLORS['gray_7_dark'], label=name))
+            if "Unknown" in col_legend_map:
+                handles_prop2.append(Patch(facecolor=col_legend_map["Unknown"],
+                                           edgecolor=OPSIN_COLORS['gray_7_dark'],
+                                           label="Unknown Source"))
 
-        cat_legend_rel_height = 0.6  # Proportion of legend_panel_height for categorical legend
+        legend_current_top = legend_panel_bottom + legend_panel_height
+        legend_gap = 0.015
+        cbar_min_height = 0.1
+        legend_axes = []
 
-        if handles_cat:
-            cat_legend_title_str = " / ".join(title_parts_cat) if title_parts_cat else "Categories"
-
-            ax_cat_legend_y = legend_panel_bottom + legend_panel_height * (1 - cat_legend_rel_height)  # Top part
-            ax_cat_legend_h = legend_panel_height * cat_legend_rel_height * 0.95  # Slightly less than allocated
-
-            ax_cat_legend = g.fig.add_axes([
+        def _add_legend(handles, title):
+            nonlocal legend_current_top
+            if not handles:
+                return None
+            max_height = legend_current_top - (legend_panel_bottom + cbar_min_height)
+            if max_height <= 0:
+                max_height = legend_current_top - legend_panel_bottom
+            if max_height <= 0:
+                return None
+            legend_height = min(0.035 * len(handles) + 0.06, max_height)
+            legend_height = max(min(max_height, legend_height), 0.05)
+            legend_current_top -= legend_height
+            ax_leg = g.fig.add_axes([
                 legend_panel_left,
-                ax_cat_legend_y,
+                legend_current_top,
                 legend_panel_width,
-                ax_cat_legend_h
+                legend_height
             ])
-            ax_cat_legend.axis('off')
-            ax_cat_legend.legend(handles_cat, labels_cat, title=cat_legend_title_str,
-                                 loc='upper left',
-                                 fontsize=8, title_fontsize=9, frameon=False, ncol=1)
-        else:  # No categorical legend, RMSD cbar can use more space or be centered
-            ax_cat_legend_y = legend_panel_bottom + legend_panel_height  # Effectively, categorical legend takes no space
-            ax_cat_legend_h = 0
+            ax_leg.axis('off')
+            legend_obj = ax_leg.legend(handles=handles, title=title, loc='upper left',
+                                       fontsize=9, title_fontsize=10, frameon=False)
+            legend_axes.append(legend_obj)
+            if legend_current_top - legend_gap > legend_panel_bottom + cbar_min_height:
+                legend_current_top -= legend_gap
+            else:
+                legend_current_top = legend_panel_bottom + cbar_min_height
+            return legend_obj
 
-        # --- Reposition RMSD Colorbar (g.cax) BELOW categorical legend ---
+        _add_legend(handles_prop1, prop1_name)
+        _add_legend(handles_prop2, prop2_name)
+
+        available_cbar_height = legend_current_top - legend_panel_bottom
+        if available_cbar_height < cbar_min_height:
+            available_cbar_height = cbar_min_height
+        if available_cbar_height > legend_panel_height:
+            available_cbar_height = legend_panel_height
+
+        # --- Reposition RMSD Colorbar beneath legends ---
         if g.cax is not None:
-            cbar_rel_height = 1.0 - (
-                cat_legend_rel_height if handles_cat else 0) - 0.05  # Remaining relative height, minus padding
-            if cbar_rel_height < 0.1: cbar_rel_height = 0.1  # Min height for cbar
-
-            cbar_actual_height = legend_panel_height * cbar_rel_height
-            cbar_y_position = legend_panel_bottom  # Start at bottom of panel if cat_legend was above
-
-            # If categorical legend exists, place cbar below it
-            if handles_cat:
-                cbar_y_position = legend_panel_bottom
-                cbar_actual_height = ax_cat_legend_y - legend_panel_bottom - 0.03  # Space below cat legend minus padding
-                if cbar_actual_height < 0.05 * legend_panel_height: cbar_actual_height = 0.05 * legend_panel_height  # min height
-
             g.cax.set_position([
-                legend_panel_left + legend_panel_width * 0.1,  # Indent cbar slightly within its panel space
-                cbar_y_position,
-                0.035,  # Width of colorbar (fixed, adjust as needed)
-                cbar_actual_height  # Calculated height
+                legend_panel_left + legend_panel_width * 0.1,
+                legend_panel_bottom,
+                0.035,
+                available_cbar_height
             ])
             g.cax.tick_params(labelsize=8)
-            # Ensure RMSD label is on the left and readable
-            g.cax.set_ylabel(g.cax.get_ylabel(), fontsize=9, rotation=90, labelpad=15)  # Keep original label text
+            g.cax.set_ylabel(g.cax.get_ylabel(), fontsize=9, rotation=90, labelpad=15)
             g.cax.yaxis.set_label_position('left')
             g.cax.yaxis.set_ticks_position('left')
+
+            if color_mode == 'step' and step_tick_positions:
+                g.cax.set_yticks(step_tick_positions)
+                g.cax.set_yticklabels(step_tick_labels, fontsize=8)
 
         if output_file:
             g.fig.savefig(output_file, dpi=300)
@@ -998,7 +1082,7 @@ def plot_distances_with_std(distance_table, title="Distance to Retinal by Positi
 
 def plot_helix_logo_plots(
         residue_table_data,
-        figsize=(20, 5),
+        figsize=(18, 12),
         frequency_threshold=0.15
 ):
     """
@@ -1015,7 +1099,31 @@ def plot_helix_logo_plots(
         return fig
 
     window_size = 4  # Number of positions to show on either side of X.50
-    fig, axes = plt.subplots(1, 7, figsize=figsize, sharey=True)  # sharey=True is good
+    fig = plt.figure(figsize=figsize)
+    gs = fig.add_gridspec(3, 3, hspace=0.4, wspace=0.3)
+
+    layout_positions = {
+        1: (0, 0),
+        2: (0, 1),
+        3: (0, 2),
+        4: (1, 0),
+        5: (1, 1),
+        6: (2, 0),
+        7: (2, 1),
+    }
+
+    axes_dict = {}
+    shared_axis = None
+    for helix_idx in range(1, 8):
+        row, col = layout_positions[helix_idx]
+        sharey_kwargs = {'sharey': shared_axis} if shared_axis is not None else {}
+        current_ax = fig.add_subplot(gs[row, col], **sharey_kwargs)
+        if shared_axis is None:
+            shared_axis = current_ax
+        axes_dict[helix_idx] = current_ax
+
+    for row, col in [(1, 2), (2, 2)]:
+        fig.add_subplot(gs[row, col]).axis('off')
 
     tm_cols = [
         c for c in residue_table_data.columns
@@ -1026,15 +1134,15 @@ def plot_helix_logo_plots(
     filtered_residue_table = residue_table_data[tm_cols]
 
     if filtered_residue_table.empty:
-        for i in range(7):
-            axes[i].text(0.5, 0.5, f"No TM data for Helix {i + 1}", ha='center', va='center',
-                         transform=axes[i].transAxes)
-            axes[i].set_yticks([])  # Remove y-ticks as well if no data
-        plt.tight_layout()
+        for helix_idx, ax in axes_dict.items():
+            ax.text(0.5, 0.5, f"No TM data for Helix {helix_idx}", ha='center', va='center',
+                    transform=ax.transAxes)
+            ax.set_yticks([])  # Remove y-ticks as well if no data
+        fig.tight_layout()
         return fig
 
     for helix_idx in range(1, 8):
-        ax = axes[helix_idx - 1]
+        ax = axes_dict[helix_idx]
         pivot_grn_target = f"{helix_idx}.50"
 
         helix_grn_cols_sorted = sorted(
@@ -1127,18 +1235,13 @@ def plot_helix_logo_plots(
         ax.set_ylim(0, 1.0)
         ax.set_ylabel("")  # Remove y-axis title
         ax.set_yticks([])  # Remove y-axis ticks and their labels
-        # If sharey=True, the y-ticks might still appear on the first plot (axes[0])
-        # unless also explicitly removed there or for all.
-        # The loop above will remove them for each ax.
+        # If sharey=True, ensure ticks removed on shared axis as well.
 
-    # Since sharey=True, and we looped through all axes to remove yticks,
-    # no further action needed for y-axis of axes[0] specifically unless it was skipped.
-    # Ensure all axes have yticks removed if that's the intent.
-    for ax_iter in axes:  # Redundant if done in loop, but ensures it for all
+    for ax_iter in axes_dict.values():  # Redundant but ensures all axes are consistent
         ax_iter.set_yticks([])
 
-    plt.suptitle(f"Prominent Amino Acids (Freq >= {frequency_threshold * 100:.0f}%) around X.50", fontsize=14, y=0.98)
-    plt.tight_layout(rect=[0.03, 0.03, 1, 0.95])  # May need to adjust rect bottom if x-labels are rotated
+    fig.suptitle(f"Prominent Amino Acids (Freq >= {frequency_threshold * 100:.0f}%) around X.50", fontsize=14, y=0.98)
+    fig.tight_layout(rect=[0.03, 0.03, 1, 0.95])  # May need to adjust rect bottom if x-labels are rotated
     return fig
 
 
@@ -1391,20 +1494,20 @@ def create_combined_distance_logo_plot(distance_table_data, msa_data_df): # Rena
 
 
 def create_opsin_overview_plot(opsin_df, output_path_str=None, figsize_tuple=(16,16)): # Renamed
-    """Circular overview plot using Property1 (Warm) and Property2 (Cold) colors."""
+    """Circular overview plot highlighting molecular function and source domain."""
     df_proc = opsin_df.copy() # Renamed
-    df_proc['molecular_function_normalized'] = df_proc['molecular_function_normalized'].fillna('Unknown').astype(str)
+    df_proc['molecular_function'] = df_proc['molecular_function'].fillna('Unknown').astype(str)
     df_proc['domain'] = df_proc['domain'].fillna('Unknown').astype(str)
-    df_sorted_plot = df_proc.sort_values(by=['molecular_function_normalized','domain','short_name'],ignore_index=True) # Renamed
+    df_sorted_plot = df_proc.sort_values(by=['molecular_function','domain','short_name'],ignore_index=True) # Renamed
     N_items = len(df_sorted_plot) # Renamed
     if N_items == 0:
         fig, ax = plt.subplots(figsize=figsize_tuple); ax.text(0.5,0.5,"No data",ha='center',va='center'); return fig
 
     # Use get_categorical_colors for consistent property coloring
-    prop1_colors_map = get_categorical_colors(df_sorted_plot['molecular_function_normalized'].unique(), property_type='property1')
+    prop1_colors_map = get_categorical_colors(df_sorted_plot['molecular_function'].unique(), property_type='property1')
     prop2_colors_map = get_categorical_colors(df_sorted_plot['domain'].unique(), property_type='property2')
 
-    ring1_plot_colors = [prop1_colors_map.get(f, OPSIN_COLORS['gray_3_light']) for f in df_sorted_plot['molecular_function_normalized']]
+    ring1_plot_colors = [prop1_colors_map.get(f, OPSIN_COLORS['gray_3_light']) for f in df_sorted_plot['molecular_function']]
     ring2_plot_colors = [prop2_colors_map.get(d, OPSIN_COLORS['gray_3_light']) for d in df_sorted_plot['domain']]
     # Ensure 'experimentally_determined' is boolean
     if 'experimentally_determined' in df_sorted_plot.columns and df_sorted_plot['experimentally_determined'].dtype != bool:
@@ -1420,50 +1523,55 @@ def create_opsin_overview_plot(opsin_df, output_path_str=None, figsize_tuple=(16
     elif 'is_predicted' not in df_sorted_plot.columns:
          df_sorted_plot['is_predicted'] = True # Fallback: assume predicted if column missing
 
-    ring4_dot_labels = ['•' if x else '' for x in df_sorted_plot['is_predicted']]
+    # Ring 4 should display a dot for every entry to reflect that all structures are modelled
+    ring4_dot_labels = ['•'] * N_items
 
 
     fig = plt.figure(figsize=figsize_tuple); ax = fig.add_axes([0.05,0.05,0.7,0.9])
     R1, R2, R3, R4 = 0.65, 0.85, 0.93, 0.98 # Renamed radii
-    SLICE_W, DOT_W = 0.18, 0.03 # Renamed widths
+    SLICE_W, DOT_W = 0.18, 0.02 # Renamed widths (smaller dots)
+    DOT_FONT_SIZE = 18
+    ring_dot_textprops = {'va':'center','ha':'center','fontsize':DOT_FONT_SIZE}
 
     ax.pie([1]*N_items, colors=ring1_plot_colors, radius=R1, wedgeprops=dict(width=SLICE_W, edgecolor=OPSIN_COLORS['white']), startangle=90, counterclock=False)
     ax.pie([1]*N_items, colors=ring2_plot_colors, radius=R2, wedgeprops=dict(width=SLICE_W, edgecolor=OPSIN_COLORS['white']), startangle=90, counterclock=False)
     ax.pie([1]*N_items, labels=ring3_dot_labels, radius=R3, labeldistance=1.02,
            wedgeprops=dict(width=DOT_W, edgecolor=OPSIN_COLORS['white'], facecolor='none'), startangle=90, counterclock=False,
-           textprops={'va':'center','ha':'center','fontsize':16,'color':STATUS_EXPERIMENTAL_COLOR})
+           textprops=ring_dot_textprops | {'color': STATUS_EXPERIMENTAL_COLOR})
     ax.pie([1]*N_items, labels=ring4_dot_labels, radius=R4, labeldistance=1.02,
            wedgeprops=dict(width=DOT_W, edgecolor=OPSIN_COLORS['white'], facecolor='none'), startangle=90, counterclock=False,
-           textprops={'va':'center','ha':'center','fontsize':16,'color':STATUS_PREDICTED_COLOR})
+           textprops=ring_dot_textprops | {'color': STATUS_PREDICTED_COLOR})
     ax.set_title("Opsin Structures Overview", pad=25, fontsize=18) # Adjusted pad
 
     # Legends
-    leg_elements_p1 = [Patch(facecolor=c, label=p1) for p1,c in sorted(prop1_colors_map.items()) if p1 != 'Unknown' and p1 in df_sorted_plot['molecular_function_normalized'].unique()]
+    leg_elements_p1 = [Patch(facecolor=c, label=p1) for p1,c in sorted(prop1_colors_map.items()) if p1 != 'Unknown' and p1 in df_sorted_plot['molecular_function'].unique()]
     leg_elements_p2 = [Patch(facecolor=c, label=p2) for p2,c in sorted(prop2_colors_map.items()) if p2 != 'Unknown' and p2 in df_sorted_plot['domain'].unique()]
     # Add Unknown if present
-    if 'Unknown' in prop1_colors_map and 'Unknown' in df_sorted_plot['molecular_function_normalized'].unique():
-        leg_elements_p1.append(Patch(facecolor=prop1_colors_map['Unknown'], label='Unknown Function'))
+    if 'Unknown' in prop1_colors_map and 'Unknown' in df_sorted_plot['molecular_function'].unique():
+        leg_elements_p1.append(Patch(facecolor=prop1_colors_map['Unknown'], label='Unknown Molecular Function'))
     if 'Unknown' in prop2_colors_map and 'Unknown' in df_sorted_plot['domain'].unique():
-        leg_elements_p2.append(Patch(facecolor=prop2_colors_map['Unknown'], label='Unknown Domain'))
+        leg_elements_p2.append(Patch(facecolor=prop2_colors_map['Unknown'], label='Unknown Source'))
 
 
-    leg_elements_status_dots = [ # Renamed
-        Patch(facecolor='none', edgecolor='none', label=f"Experimental (• {STATUS_EXPERIMENTAL_COLOR})"), # Show color in label
-        Patch(facecolor='none', edgecolor='none', label=f"Predicted    (• {STATUS_PREDICTED_COLOR})")
+    leg_elements_status_dots = [
+        Line2D([0], [0], marker='o', color='none', markerfacecolor=STATUS_EXPERIMENTAL_COLOR,
+               markeredgecolor=STATUS_EXPERIMENTAL_COLOR, markersize=4, label='Experimental'),
+        Line2D([0], [0], marker='o', color='none', markerfacecolor=STATUS_PREDICTED_COLOR,
+               markeredgecolor=STATUS_PREDICTED_COLOR, markersize=4, label='Modelled')
     ]
 
     leg_ax_plot = fig.add_axes([0.72, 0.15, 0.25, 0.7]); leg_ax_plot.axis('off') # Renamed
     all_created_legends = [] # Renamed
     if leg_elements_p1:
-        leg1_plot = leg_ax_plot.legend(handles=leg_elements_p1, title="Property 1 (Function)", loc="upper left", fontsize=9, title_fontsize=10, frameon=False)
+        leg1_plot = leg_ax_plot.legend(handles=leg_elements_p1, title="Molecular Function", loc="upper left", fontsize=9, title_fontsize=10, frameon=False)
         all_created_legends.append(leg1_plot)
     current_y = 0.75 # Adjusted for potentially more items
     if leg_elements_p2:
-        leg2_plot = leg_ax_plot.legend(handles=leg_elements_p2, title="Property 2 (Domain)", loc="upper left", bbox_to_anchor=(0,current_y), fontsize=9, title_fontsize=10, frameon=False)
+        leg2_plot = leg_ax_plot.legend(handles=leg_elements_p2, title="Source", loc="upper left", bbox_to_anchor=(0,current_y), fontsize=9, title_fontsize=10, frameon=False)
         all_created_legends.append(leg2_plot)
         current_y -= (len(leg_elements_p2) * 0.035 + 0.1) # Dynamic offset attempt
     if leg_elements_status_dots:
-        leg3_plot = leg_ax_plot.legend(handles=leg_elements_status_dots, title="Status", loc="upper left", bbox_to_anchor=(0,current_y), fontsize=9, title_fontsize=10, frameon=False)
+        leg3_plot = leg_ax_plot.legend(handles=leg_elements_status_dots, loc="upper left", bbox_to_anchor=(0,current_y), fontsize=9, frameon=False)
         all_created_legends.append(leg3_plot)
 
     for i_leg in range(len(all_created_legends) -1 ): # Re-add all but the last
@@ -1471,6 +1579,295 @@ def create_opsin_overview_plot(opsin_df, output_path_str=None, figsize_tuple=(16
 
     if output_path_str: plt.savefig(output_path_str, dpi=300, bbox_inches='tight')
     return fig
+
+
+def plot_error_violin(set_a_errors, set_b_errors,
+                      labels=("Set A (Training)", "Set B (Validation)"),
+                      error_metric_label="Retinal RMSD (Å)",
+                      title="Prediction Error Distributions",
+                      output_path=None):
+    """Render side-by-side violin plots comparing two error distributions."""
+    set_a_series = pd.Series(set_a_errors, dtype=float).dropna()
+    set_b_series = pd.Series(set_b_errors, dtype=float).dropna()
+
+    if set_a_series.empty and set_b_series.empty:
+        fig, ax = plt.subplots(figsize=(6, 4))
+        ax.text(0.5, 0.5, "No error data available", ha='center', va='center', fontsize=12)
+        ax.axis('off')
+        if output_path:
+            fig.savefig(output_path, dpi=300, bbox_inches='tight')
+        return fig
+
+    data_frames = []
+    if not set_a_series.empty:
+        data_frames.append(pd.DataFrame({
+            'Dataset': labels[0],
+            'Error': set_a_series
+        }))
+    if not set_b_series.empty:
+        data_frames.append(pd.DataFrame({
+            'Dataset': labels[1],
+            'Error': set_b_series
+        }))
+
+    combined_df = pd.concat(data_frames, ignore_index=True)
+
+    fig, ax = plt.subplots(figsize=(7, 6))
+    palette = [OPSIN_COLORS['warm_orange_medium'], OPSIN_COLORS['cold_blue_medium']]
+    sns.violinplot(data=combined_df, x='Dataset', y='Error', palette=palette[:len(data_frames)],
+                   cut=0, inner='quartile', linewidth=1.1, saturation=0.85, ax=ax)
+    sns.stripplot(data=combined_df, x='Dataset', y='Error', color=OPSIN_COLORS['gray_7_dark'],
+                  size=3, alpha=0.45, jitter=True, ax=ax)
+
+    ax.set_xlabel('Dataset', fontsize=12)
+    ax.set_ylabel(error_metric_label, fontsize=12)
+    ax.set_title(title, fontsize=15, pad=12)
+    ax.grid(axis='y', linestyle='--', alpha=0.3)
+
+    medians = combined_df.groupby('Dataset')['Error'].median()
+    for idx, dataset_label in enumerate(combined_df['Dataset'].unique()):
+        if dataset_label in medians:
+            median_val = medians[dataset_label]
+            ax.text(idx, median_val, f"Median: {median_val:.2f}",
+                    ha='center', va='bottom', fontsize=10,
+                    color=OPSIN_COLORS['gray_7_dark'], fontweight='bold')
+
+    ax.set_ylim(bottom=0)
+    plt.tight_layout()
+    if output_path:
+        fig.savefig(output_path, dpi=300, bbox_inches='tight')
+    return fig
+
+
+def plot_error_violin_panel(error_df, dataset_col='Dataset',
+                            metrics=None,
+                            palette=None,
+                            figsize=(18, 6),
+                            title="Error Distributions by Dataset",
+                            output_path=None):
+    """Plot multiple error metrics as side-by-side violin plots."""
+    if metrics is None:
+        metrics = [
+            ('backbone_rmsd', 'Backbone RMSD (Å)'),
+            ('pocket_rmsd', 'Binding Pocket RMSD (Å)'),
+            ('retinal_rmsd', 'Retinal RMSD (Å)')
+        ]
+
+    filtered_df = error_df.copy()
+    filtered_df = filtered_df.dropna(subset=[dataset_col])
+    if filtered_df.empty:
+        fig, ax = plt.subplots(figsize=(6, 4))
+        ax.text(0.5, 0.5, "No error data available", ha='center', va='center', fontsize=12)
+        ax.axis('off')
+        if output_path:
+            fig.savefig(output_path, dpi=300, bbox_inches='tight')
+        return fig
+
+    available_metrics = [(col, label) for col, label in metrics if col in filtered_df.columns]
+    if not available_metrics:
+        fig, ax = plt.subplots(figsize=(6, 4))
+        ax.text(0.5, 0.5, "Specified metrics not found", ha='center', va='center', fontsize=12)
+        ax.axis('off')
+        if output_path:
+            fig.savefig(output_path, dpi=300, bbox_inches='tight')
+        return fig
+
+    categories = filtered_df[dataset_col].dropna().unique().tolist()
+    if palette is None:
+        base_colors = [OPSIN_COLORS['warm_orange_medium'], OPSIN_COLORS['cold_blue_medium'], OPSIN_COLORS['utility_teal']]
+        palette = {cat: base_colors[i % len(base_colors)] for i, cat in enumerate(categories)}
+
+    fig, axes = plt.subplots(1, len(available_metrics), figsize=figsize, sharey=False)
+    if len(available_metrics) == 1:
+        axes = [axes]
+
+    for ax, (metric_col, metric_label) in zip(axes, available_metrics):
+        sns.violinplot(data=filtered_df, x=dataset_col, y=metric_col,
+                       order=categories, palette=palette, cut=0,
+                       inner='quartile', linewidth=1.1, saturation=0.85, ax=ax)
+        sns.stripplot(data=filtered_df, x=dataset_col, y=metric_col,
+                      order=categories, color=OPSIN_COLORS['gray_7_dark'],
+                      size=3, alpha=0.45, jitter=True, ax=ax)
+
+        ax.set_xlabel('Dataset', fontsize=12)
+        ax.set_ylabel(metric_label, fontsize=12)
+        ax.grid(axis='y', linestyle='--', alpha=0.3)
+        medians = filtered_df.groupby(dataset_col)[metric_col].median()
+        for idx, cat in enumerate(categories):
+            if cat in medians and pd.notna(medians[cat]):
+                ax.text(idx, medians[cat], f"Median: {medians[cat]:.2f}",
+                        ha='center', va='bottom', fontsize=10,
+                        color=OPSIN_COLORS['gray_7_dark'], fontweight='bold')
+        ax.set_ylim(bottom=0)
+
+    fig.suptitle(title, fontsize=16, y=1.02)
+    fig.tight_layout()
+    if output_path:
+        fig.savefig(output_path, dpi=300, bbox_inches='tight')
+    return fig
+
+
+def plot_error_box_comparison(set_a_df: pd.DataFrame,
+                              set_b_df: pd.DataFrame,
+                              metrics=None,
+                              dataset_labels=("Benchmark set", "Blind test set"),
+                              output_path=None,
+                              figure_size=(13, 6)):
+    """Plot paired boxplots with muted colors for the key RMSD metrics."""
+    metrics = metrics or ["backbone_rmsd", "pocket_rmsd", "retinal_rmsd"]
+    metric_display = {
+        "backbone_rmsd": "Cα RMSD",
+        "pocket_rmsd": "Binding Pocket iRMSD",
+        "retinal_rmsd": "Retinal L-RMSD",
+    }
+
+    set_a = set_a_df.copy()
+    set_b = set_b_df.copy()
+    if set_a.empty and set_b.empty:
+        fig, ax = plt.subplots(figsize=(6, 4))
+        ax.text(0.5, 0.5, "No error data available", ha='center', va='center', fontsize=12)
+        ax.axis('off')
+        if output_path:
+            fig.savefig(output_path, dpi=300, bbox_inches='tight')
+        return fig, pd.DataFrame()
+
+    if 'protein' not in set_a.columns:
+        set_a = set_a.copy()
+        set_a['protein'] = [f"setA_{i}" for i in range(len(set_a))]
+    if 'protein' not in set_b.columns:
+        set_b = set_b.copy()
+        set_b['protein'] = [f"setB_{i}" for i in range(len(set_b))]
+
+    set_a['Dataset'] = dataset_labels[0]
+    set_b['Dataset'] = dataset_labels[1]
+    combined = pd.concat([set_a, set_b], ignore_index=True)
+    combined = combined.dropna(subset=metrics)
+
+    summary = combined.groupby('Dataset')[metrics].agg(['mean', 'median', 'std', 'min', 'max'])
+
+    melted = combined.melt(
+        id_vars=['protein', 'Dataset'],
+        value_vars=metrics,
+        var_name='RMSD_Type',
+        value_name='RMSD_Value'
+    )
+    melted['RMSD_Type'] = melted['RMSD_Type'].map(metric_display).fillna(melted['RMSD_Type'])
+
+    fig, ax = plt.subplots(figsize=figure_size, dpi=300)
+    colors = [OPSIN_COLORS['muted_blue_gray'], OPSIN_COLORS['muted_coral']]
+    positions_train = np.arange(1, len(metrics) * 3, 3)
+    positions_val = positions_train + 1
+
+    label_fontsize = 18
+    annotation_fontsize = max(label_fontsize - 2, 12)
+    annotation_color = OPSIN_COLORS.get('gray_7_dark', OPSIN_COLORS.get('black', 'black'))
+    annotation_entries = []
+
+    for idx, metric_name in enumerate([metric_display.get(m, m) for m in metrics]):
+        subset = melted[melted['RMSD_Type'] == metric_name]
+        train_vals = subset[subset['Dataset'] == dataset_labels[0]]['RMSD_Value'].values
+        val_vals = subset[subset['Dataset'] == dataset_labels[1]]['RMSD_Value'].values
+
+        bp_train = ax.boxplot([train_vals], positions=[positions_train[idx]], widths=0.6,
+                              patch_artist=True, showmeans=True,
+                              meanprops=dict(marker='D', markerfacecolor='white', markeredgecolor='black',
+                                             markersize=4, markeredgewidth=0.8),
+                              medianprops=dict(color='black', linewidth=1.2),
+                              boxprops=dict(linewidth=0.8, edgecolor='black'),
+                              whiskerprops=dict(linewidth=0.8, color='black'),
+                              capprops=dict(linewidth=0.8, color='black'),
+                              flierprops=dict(marker='o', markerfacecolor='white', markeredgecolor='black',
+                                              markersize=5, markeredgewidth=0.8))
+
+        bp_val = ax.boxplot([val_vals], positions=[positions_val[idx]], widths=0.6,
+                             patch_artist=True, showmeans=True,
+                             meanprops=dict(marker='D', markerfacecolor='white', markeredgecolor='black',
+                                            markersize=4, markeredgewidth=0.8),
+                             medianprops=dict(color='black', linewidth=1.2),
+                             boxprops=dict(linewidth=0.8, edgecolor='black'),
+                             whiskerprops=dict(linewidth=0.8, color='black'),
+                             capprops=dict(linewidth=0.8, color='black'),
+                             flierprops=dict(marker='o', markerfacecolor='white', markeredgecolor='black',
+                                             markersize=5, markeredgewidth=0.8))
+
+        if bp_train['boxes']:
+            bp_train['boxes'][0].set_facecolor(colors[0])
+            bp_train['boxes'][0].set_alpha(0.85)
+        if bp_val['boxes']:
+            bp_val['boxes'][0].set_facecolor(colors[1])
+            bp_val['boxes'][0].set_alpha(0.85)
+
+        for data_vals, pos in ((train_vals, positions_train[idx]), (val_vals, positions_val[idx])):
+            if data_vals.size == 0:
+                continue
+            mean_val = float(np.mean(data_vals))
+            max_val = float(np.max(data_vals))
+            annotation_entries.append((pos, mean_val, max_val))
+
+    tick_fontsize = label_fontsize
+    ax.set_ylabel('Prediction error (Å)', fontsize=label_fontsize)
+    tick_positions = (positions_train + positions_val) / 2
+    tick_labels = [metric_display.get(m, m) for m in metrics]
+    ax.set_xticks(tick_positions)
+    ax.tick_params(axis='x', which='both', length=0, labelsize=tick_fontsize)
+    ax.set_xticklabels(tick_labels, fontsize=label_fontsize)
+    ax.tick_params(axis='y', labelsize=tick_fontsize)
+    if len(positions_val):
+        ax.set_xlim(0.5, positions_val[-1] + 1.5)
+
+    ax.grid(False)
+    ax.set_axisbelow(True)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.spines['left'].set_linewidth(1.0)
+    ax.spines['bottom'].set_linewidth(1.0)
+
+    legend_labels = (
+        f"{dataset_labels[0]} (N={set_a_df.shape[0]})",
+        f"{dataset_labels[1]} (N={set_b_df.shape[0]})"
+    )
+    legend_elements = [
+        Patch(facecolor=colors[0], edgecolor='black', linewidth=0.8, alpha=0.85, label=legend_labels[0]),
+        Patch(facecolor=colors[1], edgecolor='black', linewidth=0.8, alpha=0.85, label=legend_labels[1])
+    ]
+    ax.legend(
+        handles=legend_elements,
+        loc='upper left',
+        fontsize=label_fontsize,
+        frameon=False,
+        handlelength=1.5,
+        borderpad=0.4,
+        bbox_to_anchor=(0.02, 0.98),
+        borderaxespad=0.0,
+        bbox_transform=ax.transAxes
+    )
+
+    if annotation_entries:
+        base_bottom, base_top = ax.get_ylim()
+        span = base_top - base_bottom
+        if span <= 0:
+            span = 1.0
+        offset = 0.04 * span
+        top_needed = base_top
+        for pos, mean_val, max_val in annotation_entries:
+            y = max_val + offset
+            ax.text(
+                pos,
+                y,
+                f"μ={mean_val:.2f}",
+                ha='center',
+                va='bottom',
+                fontsize=annotation_fontsize,
+                color=annotation_color
+            )
+            top_needed = max(top_needed, y + 0.05 * span)
+        ax.set_ylim(base_bottom, top_needed)
+
+    fig.tight_layout()
+    if output_path:
+        fig.savefig(output_path, dpi=300, bbox_inches='tight')
+
+    return fig, summary
 
 
 def plot_conservation_around_x50(residue_table_data, conservation_scores_dict=None, figsize_tuple=(20,10)): # Renamed

@@ -113,7 +113,7 @@ def assign_dataset_split(release_date: Optional[date], fallback_year: Optional[i
 def main() -> None:
     parser = argparse.ArgumentParser(description="Add release metadata to opsin property CSV")
     parser.add_argument("--input", default="property/mo_exp.csv", type=Path)
-    parser.add_argument("--output", type=Path, default=None,
+    parser.add_argument("--outputs", type=Path, default=None,
                         help="Path for augmented CSV (defaults to overwriting input)")
     parser.add_argument("--hideaki-dataset", type=Path, default=Path("data/structure/structure_dataset/standard/hideaki_exp.json"),
                         help="JSON file listing hideaki experimental PDB IDs")

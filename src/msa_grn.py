@@ -315,7 +315,7 @@ def analyze_residue_composition(msa_df, positions):
 def count_residues_by_helix(df):
     """
     Counts residue positions by helix in a GRN-labeled DataFrame.
-    Focuses primarily on N.YY format (where N is the helix number) to match your desired output.
+    Focuses primarily on N.YY format (where N is the helix number) to match your desired outputs.
     
     Args:
         df: DataFrame with GRN column labels
@@ -714,7 +714,7 @@ def create_grn_column_mapping(ref_struct, original_columns):
             continue
         
         # Assign GRN labels using standard N.YY format (e.g., 1.50, 1.51, 1.52, etc.)
-        # instead of Nx<YY> format to match your desired output
+        # instead of Nx<YY> format to match your desired outputs
         for i, auth_seq in enumerate(helix_auth_seqs):
             offset = i - middle_idx
             # Use N.<YY> format for transmembrane helices
@@ -1318,7 +1318,7 @@ def generate_grn_msa_tables(seq_alignment_dicts, processed_structures_complete, 
 
     print(f"[DEBUG] New columns successfully applied: {len(new_columns)} columns total")
 
-    # Debug output to check GRN column names
+    # Debug outputs to check GRN column names
     print(f"[DEBUG] GRN mapping generated {len(column_mapping)} position mappings")
 
     # Store the column mapping in the tables for reference

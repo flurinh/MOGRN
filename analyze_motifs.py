@@ -1274,7 +1274,7 @@ def main():
     parser.add_argument('--properties', type=Path,
                        default=Path('property/mo_exp.csv'),
                        help='Path to properties CSV')
-    parser.add_argument('--output-dir', type=Path,
+    parser.add_argument('--outputs-dir', type=Path,
                        default=Path('opsin_output/motifs'),
                        help='Output directory')
     parser.add_argument('--min-support', type=float, default=0.8,

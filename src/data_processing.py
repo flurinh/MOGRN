@@ -545,7 +545,7 @@ def format_cif_processor_data(processor) -> None:
     print(f"Formatted data types for {len(processor.pdb_ids)} structures in processor")
 
 
-def load_opsin_structures(data_dir, output_dir='output', chain_id='A', visualize=True, use_cache=True, cache_raw=True,
+def load_opsin_structures(data_dir, output_dir='outputs', chain_id='A', visualize=True, use_cache=True, cache_raw=True,
                           retinal_name='RET', retinal_cutoff=6.0):
     """
     Step 1: Load and process opsin structures from prepared datasets
@@ -585,7 +585,7 @@ def load_opsin_structures(data_dir, output_dir='output', chain_id='A', visualize
     os.environ["PROTOS_REF_DATA_ROOT"] = str(data_dir.absolute())  # Force reference data to match user data
 
     print(f"Using PROTOS data directory: {data_dir}")
-    print(f"Using analysis output directory: {output_dir}")
+    print(f"Using analysis outputs directory: {output_dir}")
 
     # Define cache file paths - store cache in output_dir for better organization
     cache_dir = output_dir / "cache"
@@ -763,7 +763,7 @@ def load_opsin_structures(data_dir, output_dir='output', chain_id='A', visualize
                 # 2. Then in the default opsin_output location
                 # 3. Finally in the protos reference data
 
-                # Option 1: Check in current output directory
+                # Option 1: Check in current outputs directory
                 dataset_path = structure_dir / "structure_dataset" / "standard" / f"{dataset_name}.json"
 
                 # Option 2: Check in default opsin_output location
@@ -880,11 +880,11 @@ def load_opsin_structures(data_dir, output_dir='output', chain_id='A', visualize
                         "pdb_ids": pdb_ids
                     }
 
-                    # If the dataset file doesn't exist in the output directory, copy it there
+                    # If the dataset file doesn't exist in the outputs directory, copy it there
                     output_dataset_path = structure_dir / "structure_dataset" / "standard" / f"{dataset_name}.json"
                     if dataset_path != output_dataset_path and not output_dataset_path.exists():
                         try:
-                            print(f"  Copying dataset file to output directory: {output_dataset_path}")
+                            print(f"  Copying dataset file to outputs directory: {output_dataset_path}")
                             os.makedirs(output_dataset_path.parent, exist_ok=True)
                             with open(dataset_path, 'r') as src, open(output_dataset_path, 'w') as dst:
                                 dst.write(src.read())

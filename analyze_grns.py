@@ -24,14 +24,14 @@ import sys
 sys.path.append('src')
 from property_mapping import PropertyMapper
 
-# Set up output directories
+# Set up outputs directories
 OUTPUT_BASE = Path("opsin_output/grn_analysis")
 CONSERVATION_DIR = OUTPUT_BASE / "conservation"
 FIGURES_DIR = OUTPUT_BASE / "figures"
 REPORTS_DIR = OUTPUT_BASE / "reports"
 
 def ensure_output_dirs():
-    """Ensure all output directories exist"""
+    """Ensure all outputs directories exist"""
     for dir_path in [OUTPUT_BASE, CONSERVATION_DIR, FIGURES_DIR, REPORTS_DIR]:
         dir_path.mkdir(parents=True, exist_ok=True)
 
@@ -1711,19 +1711,19 @@ def main():
                        help='Skip figure generation')
     
     # Output options
-    parser.add_argument('--output-dir', default='opsin_output/grn_analysis',
-                       help='Base output directory')
+    parser.add_argument('--outputs-dir', default='opsin_output/grn_analysis',
+                       help='Base outputs directory')
     
     args = parser.parse_args()
     
-    # Update output directories based on argument
+    # Update outputs directories based on argument
     global OUTPUT_BASE, CONSERVATION_DIR, FIGURES_DIR, REPORTS_DIR
     OUTPUT_BASE = Path(args.output_dir)
     CONSERVATION_DIR = OUTPUT_BASE / "conservation"
     FIGURES_DIR = OUTPUT_BASE / "figures"
     REPORTS_DIR = OUTPUT_BASE / "reports"
     
-    # Ensure output directories exist
+    # Ensure outputs directories exist
     ensure_output_dirs()
     
     # Load data

@@ -79,11 +79,23 @@ class PropertyMapper:
             opsin_name = str(row['opsin name']).strip() if pd.notna(row['opsin name']) else None
             
             # Build property data
+            molecular_function = 'Unknown'
+            if pd.notna(row.get('molecular_function')):
+                mf_raw = str(row['molecular_function']).strip().replace('?', '')
+                if mf_raw:
+                    molecular_function = mf_raw
+
+            molecular_function_normalized = molecular_function
+            if 'molecular_function_normalized' in row and pd.notna(row.get('molecular_function_normalized')):
+                mf_norm_raw = str(row['molecular_function_normalized']).strip().replace('?', '')
+                if mf_norm_raw:
+                    molecular_function_normalized = mf_norm_raw
+
             property_data = {
-                'domain': str(row['Rhodopsin Type (Microbial)']).strip() 
+                'domain': str(row['Rhodopsin Type (Microbial)']).strip()
                           if pd.notna(row['Rhodopsin Type (Microbial)']) else 'Unknown',
-                'molecular_function': str(row['molecular_function']).strip().replace('?', '')
-                                    if pd.notna(row['molecular_function']) else 'Unknown',
+                'molecular_function': molecular_function,
+                'molecular_function_normalized': molecular_function_normalized,
                 'experimentally_determined': bool(row.get('experimentally_determined', False))
                                            if 'experimentally_determined' in row else False,
                 'short_name': short_name,

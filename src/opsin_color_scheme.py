@@ -57,6 +57,9 @@ OPSIN_COLORS = {
     'utility_lavender': '#E6E6FA',
     'white': '#FFFFFF', # Alias for gray_1_white
     'black': '#000000', # Alias for gray_9_black
+    # Muted comparison palette entries
+    'muted_blue_gray': '#89A8B2',
+    'muted_coral': '#E4A5A5',
 }
 OPSIN_COLORS['white'] = OPSIN_COLORS['gray_1_white'] # Explicit alias
 OPSIN_COLORS['black'] = OPSIN_COLORS['gray_9_black'] # Explicit alias

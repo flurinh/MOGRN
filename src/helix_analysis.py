@@ -195,7 +195,7 @@ def annotate_helices_from_alignments(processed_structures, reference_id, helix_d
     return processed_structures
 
 
-def orient_and_annotate_structures(data_dict, output_dir='output', visualize=True):
+def orient_and_annotate_structures(data_dict, output_dir='outputs', visualize=True):
     """
     Step 3 & 4: Orient structures and annotate helices using alignments
 
@@ -205,7 +205,7 @@ def orient_and_annotate_structures(data_dict, output_dir='output', visualize=Tru
 
     Args:
         data_dict: Dictionary with data from previous steps
-        output_dir: Directory to save output files
+        output_dir: Directory to save outputs files
         visualize: Whether to generate visualizations
 
     Returns:
@@ -307,18 +307,18 @@ def orient_and_annotate_structures(data_dict, output_dir='output', visualize=Tru
     }
 
 
-def align_to_reference_and_annotate_helices(data_dict, output_dir='output', visualize=True):
+def align_to_reference_and_annotate_helices(data_dict, output_dir='outputs', visualize=True):
     """
     Step 4: Custom step that aligns all structures to a reference structure
     (from helix_ref_CnChR2_J230_refine9.json) and annotates all structures
     with helix numbers based on the reference helices.
 
-    If helices.json already exists in property directory, it will load helix
+    If helices_.json already exists in property directory, it will load helix
     definitions from there instead of recalculating alignments.
 
     Args:
         data_dict: Dictionary with data from previous steps
-        output_dir: Directory to save output files
+        output_dir: Directory to save outputs files
         visualize: Whether to generate visualizations
 
     Returns:
@@ -353,7 +353,7 @@ def align_to_reference_and_annotate_helices(data_dict, output_dir='output', visu
     formatted_helix_defs = {}
     ref_id = None
 
-    # First, check if we already have helices.json with annotations for existing structures
+    # First, check if we already have helices_.json with annotations for existing structures
     if os.path.exists(helix_cache_file):
         try:
             print(f"[INFO] Found existing helix definitions at {helix_cache_file}")

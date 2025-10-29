@@ -46,16 +46,20 @@ from src.visualize_alignment_grn import create_opsin_visualization_from_workflow
 
 try:
     from src.property_mapping import create_unified_property_mapper
-    from src.visualization_functions import (
+except:
+    print("cannot import unified property mapper")
+from src.opsin_color_scheme import OPSIN_COLORS
+from src.visualization_functions import (
         compute_rmsd_metrics,
         create_opsin_overview_plot,
         visualize_rmsd_matrix_improved,
         _annotate_metrics_on_clustergrid,
         plot_distances_with_std,
-        plot_helix_logo_plots
+        plot_helix_logo_plots,
+        plot_error_box_comparison
     )
+try:
     from protos.processing.grn.grn_utils import sort_grns_str, get_tm_residues
-
     print("[INFO] Successfully imported custom modules.")
 except ImportError as e:
     print(f"[ERROR] Failed to import custom modules: {e}")
@@ -339,13 +343,13 @@ def main(args=None):
     parser = argparse.ArgumentParser(description='Generate MOGRN visualizations')
     parser.add_argument('--input-dir', type=str, default='opsin_output',
                        help='Input directory with analysis results')
-    parser.add_argument('--output-dir', type=str, default='opsin_output/paper_figures',
+    parser.add_argument('--outputs-dir', type=str, default='opsin_output/paper_figures',
                        help='Output directory for figures')
     parser.add_argument('--skip-property-analysis', action='store_true',
                        help='Skip property analysis visualizations')
     parser.add_argument('--skip-interactive', action='store_true',
                        help='Skip interactive GRN visualization')
-    parser.add_argument('--only', type=str, choices=['overview', 'rmsd', 'distance', 'logo', 'property', 'interactive'],
+    parser.add_argument('--only', type=str, choices=['overview', 'errors', 'rmsd', 'distance', 'logo', 'property', 'interactive'],
                        help='Generate only specific visualization type')
     
     if args is None:
@@ -442,54 +446,47 @@ def main(args=None):
             property_data_map = data.get('property_data', {})
 
             for sid, struct_info in processed_structures_map.items():
-                mf, domain, is_experimental, display_name = "Unknown", "Unknown", False, sid
-                
-                # First check embedded properties in structure (from unified mapper)
-                if isinstance(struct_info, dict) and 'properties' in struct_info:
-                    struct_props = struct_info['properties']
-                    if isinstance(struct_props, dict):
-                        # Get molecular function
-                        mf_val = struct_props.get('molecular_function')
-                        if pd.notna(mf_val) and str(mf_val).strip() and str(mf_val).lower() != "unknown":
-                            mf = str(mf_val)
-                        
-                        # Get domain
-                        domain_val = struct_props.get('domain')
-                        if pd.notna(domain_val) and str(domain_val).strip() and str(domain_val).lower() != "unknown":
-                            domain = str(domain_val)
-                        
-                        # Get experimental status
-                        is_experimental_prop = struct_props.get('experimentally_determined', False)
-                        is_experimental = bool(is_experimental_prop)
-                        
-                        # Get display name
-                        display_name_prop = struct_props.get('short_name', struct_props.get('opsin_name', sid))
-                        if pd.notna(display_name_prop) and str(display_name_prop).strip():
-                            display_name = str(display_name_prop)
-                
-                # Fallback to property_data_map for backward compatibility
-                elif sid in property_data_map:
-                    prop_entry = property_data_map[sid]
-                    if isinstance(prop_entry, dict):
-                        mf_val = prop_entry.get('molecular_function')
-                        if pd.notna(mf_val) and str(mf_val).strip() and str(mf_val).lower() != "unknown":
-                            mf = str(mf_val)
-                        
-                        domain_val = prop_entry.get('domain')
-                        if pd.notna(domain_val) and str(domain_val).strip() and str(domain_val).lower() != "unknown":
-                            domain = str(domain_val)
-                        
-                        is_experimental_prop = prop_entry.get('experimentally_determined', False)
-                        is_experimental = bool(is_experimental_prop)
-                        
-                        display_name_prop = prop_entry.get('short_name', prop_entry.get('display_name', sid))
-                        if pd.notna(display_name_prop) and str(display_name_prop).strip():
-                            display_name = str(display_name_prop)
+                molecular_function = "Unknown"
+                domain = "Unknown"
+                is_experimental = False
+                display_name = sid
+
+                property_candidates = []
+                if isinstance(struct_info, dict):
+                    property_candidates.append(struct_info.get('properties', {}))
+                property_candidates.append(property_data_map.get(sid, property_data_map.get(sid.replace('_model_0', ''), {})))
+                if mapper is not None:
+                    property_candidates.append(mapper.get_properties(sid) or {})
+
+                for props in property_candidates:
+                    if not isinstance(props, dict) or not props:
+                        continue
+
+                    mf_val = props.get('molecular_function') or props.get('molecular_function_normalized')
+                    if pd.notna(mf_val) and str(mf_val).strip() and str(mf_val).lower() != "unknown":
+                        molecular_function = str(mf_val)
+
+                    domain_val = props.get('domain')
+                    if pd.notna(domain_val) and str(domain_val).strip() and str(domain_val).lower() != "unknown":
+                        domain = str(domain_val)
+
+                    if 'experimentally_determined' in props:
+                        is_experimental = bool(props.get('experimentally_determined'))
+
+                    display_name_prop = props.get('short_name', props.get('opsin_name', display_name))
+                    if pd.notna(display_name_prop) and str(display_name_prop).strip():
+                        display_name = str(display_name_prop)
+
+                    if molecular_function.lower() != 'unknown' and domain.lower() != 'unknown' and display_name:
+                        break
 
                 overview_data_list.append({
-                    'id': sid, 'short_name': display_name,
-                    'molecular_function_normalized': mf, 'domain': domain,
-                    'experimentally_determined': is_experimental
+                    'id': sid,
+                    'short_name': display_name,
+                    'molecular_function': molecular_function,
+                    'domain': domain,
+                    'experimentally_determined': is_experimental,
+                    'is_predicted': not is_experimental
                 })
             overview_df = pd.DataFrame(overview_data_list)
 
@@ -518,6 +515,48 @@ def main(args=None):
             print(f"[ERROR] Failed to generate Opsin Overview Plot: {e}")
             traceback.print_exc()
 
+    # --- Visualization 2: Error Distribution Violin Plot ---
+    if args.only is None or args.only == 'errors':
+        print("\n[VISUALIZATION 2] Generating Error Distribution Plot...")
+        try:
+            set_a_path = Path(args.input_dir) / 'set_a_errors.csv'
+            set_b_path = Path(args.input_dir) / 'set_b_errors.csv'
+
+            error_frames = []
+            if set_a_path.exists():
+                df_a = pd.read_csv(set_a_path)
+                df_a['dataset_split'] = df_a.get('dataset_split', 'A')
+            else:
+                print(f"[WARN] Set A error file not found: {set_a_path}")
+                df_a = pd.DataFrame()
+
+            if set_b_path.exists():
+                df_b = pd.read_csv(set_b_path)
+                df_b['dataset_split'] = df_b.get('dataset_split', 'B')
+            else:
+                print(f"[WARN] Set B error file not found: {set_b_path}")
+                df_b = pd.DataFrame()
+
+            if df_a.empty and df_b.empty:
+                print("[WARN] No error CSV files available. Skipping comparison plot.")
+            else:
+                comparison_path = FIGURES_OUTPUT_DIR / "02c_error_distribution_box.png"
+                fig_errors, summary = plot_error_box_comparison(
+                    df_a,
+                    df_b,
+                    metrics=['backbone_rmsd', 'pocket_rmsd', 'retinal_rmsd'],
+                    dataset_labels=('Benchmark set', 'Blind test set'),
+                    output_path=comparison_path
+                )
+                plt.close(fig_errors)
+                print(f"[SUCCESS] Saved error comparison plot to: {comparison_path}")
+                if not summary.empty:
+                    print("Summary statistics (Å):")
+                    print(summary.round(3))
+        except Exception as e:
+            print(f"[ERROR] Failed to generate error distribution plot: {e}")
+            traceback.print_exc()
+
     # --- Prepare group_dict and domain_dict as per notebook ---
     group_dict = {}
     domain_dict = {}  # This will store {'domain': name, 'average_error': val}
@@ -527,7 +566,7 @@ def main(args=None):
         overview_data_list = []
         
     for item in overview_data_list:  # Ensure overview_data_list is used
-        group_dict[item['id']] = item['molecular_function_normalized']
+        group_dict[item['id']] = item['molecular_function']
         # For domain_dict, fetch average_error if available
         avg_error = data.get('structure_errors', {}).get(item['id'], {}).get('average_error')
         domain_dict[item['id']] = {'domain': item['domain'], 'average_error': avg_error}
@@ -543,9 +582,9 @@ def main(args=None):
     else:
         print(f"[INFO] Found RMSD matrix with shape: {rmsd_df.shape}")
 
-    # --- Visualization 2: RMSD Heatmap with Improved Visualization (Clustermap) ---
+    # --- Visualization 3: RMSD Heatmap with Improved Visualization (Clustermap) ---
     if args.only is None or args.only == 'rmsd':
-        print("\n[VISUALIZATION 2] Generating RMSD Clustermap...")
+        print("\n[VISUALIZATION 3] Generating RMSD Clustermap...")
         if not rmsd_df.empty:
             try:
                 # Prepare linkage matrix
@@ -596,29 +635,46 @@ def main(args=None):
 
                 # Call the improved visualization function
                 # Assuming visualize_rmsd_matrix_improved handles its own saving if output_file is passed
+                fig2_path = FIGURES_OUTPUT_DIR / "02a_rmsd_clustermap.png"
                 fig2 = visualize_rmsd_matrix_improved(
                     rmsd_df=rmsd_df,
                     group_dict=group_dict,
                     domain_dict=domain_dict,  # Pass the dict with 'domain' and 'average_error' keys
                     linkage_matrix=Z_linkage,
                     figsize=(18, 15),  # Adjusted figsize
-                    output_file=FIGURES_OUTPUT_DIR / "02_rmsd_clustermap.png"  # Pass output file directly
+                    output_file=fig2_path  # Pass outputs file directly
                 )
 
                 if fig2 and hasattr(fig2, "ax_heatmap"):
-                    _annotate_metrics_on_clustergrid(fig2, metrics["overlay_text"])
                     # Ensure saving (if your visualize function didn’t)
-                    fig2.fig.savefig(FIGURES_OUTPUT_DIR / "02_rmsd_clustermap.png", dpi=300)
+                    fig2.fig.savefig(fig2_path, dpi=300)
                     plt.close(fig2.fig)
                 elif fig2:  # raw Figure
-                    ax = fig2.axes[0] if fig2.axes else plt.gca()
-                    ax.text(0.01, 0.99, metrics["overlay_text"], transform=ax.transAxes, ha="left", va="top",
-                            fontsize=9, family="monospace",
-                            bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="black", lw=0.8, alpha=0.85))
-                    fig2.savefig(FIGURES_OUTPUT_DIR / "02_rmsd_clustermap.png", dpi=300)
+                    fig2.savefig(fig2_path, dpi=300)
                     plt.close(fig2)
                 else:
                     print("[WARN] RMSD Clustermap was not generated.")
+
+                fig2_step_path = FIGURES_OUTPUT_DIR / "02b_rmsd_clustermap_step.png"
+                fig2_step = visualize_rmsd_matrix_improved(
+                    rmsd_df=rmsd_df,
+                    group_dict=group_dict,
+                    domain_dict=domain_dict,
+                    linkage_matrix=Z_linkage,
+                    figsize=(18, 15),
+                    output_file=fig2_step_path,
+                    color_mode='step',
+                    step_cutoffs=[0.5, 1.5, 2.5]
+                )
+
+                if fig2_step and hasattr(fig2_step, "ax_heatmap"):
+                    fig2_step.fig.savefig(fig2_step_path, dpi=300)
+                    plt.close(fig2_step.fig)
+                elif fig2_step:
+                    fig2_step.savefig(fig2_step_path, dpi=300)
+                    plt.close(fig2_step)
+                else:
+                    print("[WARN] RMSD Clustermap (step) was not generated.")
             except Exception as e:
                 print(f"[ERROR] Failed to generate RMSD Clustermap: {e}")
                 traceback.print_exc()
@@ -644,6 +700,15 @@ def main(args=None):
             print("[WARN] No suitable 'msa_df', 'msa_table', or 'residue_table' found for logo plots.")
             residue_table_for_logo = pd.DataFrame()
 
+    if residue_table_for_logo.empty:
+        curated_grn_path = Path(args.input_dir) / 'curated_grn.csv'
+        if curated_grn_path.exists():
+            try:
+                residue_table_for_logo = pd.read_csv(curated_grn_path, index_col=0)
+                print(f"[INFO] Loaded residue table for logo plots from '{curated_grn_path}'.")
+            except Exception as exc:
+                print(f"[ERROR] Failed to load curated GRN table from '{curated_grn_path}': {exc}")
+
     # Initialize filtered versions
     df_filtered_residue = pd.DataFrame()
     df_filtered_distance = pd.DataFrame()
@@ -651,8 +716,22 @@ def main(args=None):
     grns = []
 
     if not residue_table_for_logo.empty:
-        col_name_filter = '7.50'  # Renamed from col_name
-        if col_name_filter in residue_table_for_logo.columns:
+        col_name_filter = None
+        filter_candidates = ['7.50', '7.5']
+        for candidate in filter_candidates:
+            if candidate in residue_table_for_logo.columns:
+                col_name_filter = candidate
+                break
+
+        if col_name_filter is None:
+            fallback_candidates = [
+                col for col in residue_table_for_logo.columns
+                if str(col).startswith('7.5')
+            ]
+            if fallback_candidates:
+                col_name_filter = sorted(fallback_candidates, key=str)[0]
+
+        if col_name_filter and col_name_filter in residue_table_for_logo.columns:
             print(f"[INFO] Filtering by '{col_name_filter}' starting with 'K'...")
             boolean_mask = residue_table_for_logo[col_name_filter].astype(str).str.startswith('K', na=False)
             df_filtered_residue = residue_table_for_logo[boolean_mask]
@@ -681,13 +760,13 @@ def main(args=None):
                 print(
                     "[WARN] No residues remained after filtering. Distance tables will not be filtered based on this.")
         else:
-            print(f"[WARN] Filter column '{col_name_filter}' not found in residue_table_for_logo.")
+            print("[WARN] No suitable filter column (e.g., '7.5') found in residue_table_for_logo.")
     else:
         print("[WARN] residue_table_for_logo is empty. Cannot perform filtering for distance/logo plots.")
 
-    # --- Visualization 3: All-Atom Distance to Retinal Plot (was Vis 4) ---
+    # --- Visualization 4: All-Atom Distance to Retinal Plot (was Vis 4) ---
     if args.only is None or args.only == 'distance':
-        print("\n[VISUALIZATION 3] Generating All-Atom Distance to Retinal Plot...")
+        print("\n[VISUALIZATION 4] Generating All-Atom Distance to Retinal Plot...")
         if not df_filtered_distance.empty and grns:  # Ensure grns list is also populated
             try:
                 fig3 = plot_distances_with_std(
@@ -708,9 +787,9 @@ def main(args=None):
         else:
             print("[WARN] Filtered distance data or GRNs list is empty. Skipping All-Atom Distance Plot.")
 
-    # --- Visualization 4: CA-Atom Distance to Retinal Plot (was Vis 5) ---
+    # --- Visualization 5: CA-Atom Distance to Retinal Plot (was Vis 5) ---
     if args.only is None or args.only == 'distance':
-        print("\n[VISUALIZATION 4] Generating CA-Atom Distance to Retinal Plot...")
+        print("\n[VISUALIZATION 5] Generating CA-Atom Distance to Retinal Plot...")
         # For CA plot, we need GRNs relevant to df_filtered_ca_distance if its columns differ
         # However, plot_distances_with_std itself filters for TM columns.
         if not df_filtered_ca_distance.empty:
@@ -732,9 +811,9 @@ def main(args=None):
         else:
             print("[WARN] Filtered CA distance data is empty. Skipping CA-Atom Distance Plot.")
 
-    # --- Visualization 5: Helix Logo Plots (was Vis 7) ---
+    # --- Visualization 6: Helix Logo Plots (was Vis 7) ---
     if args.only is None or args.only == 'logo':
-        print("\n[VISUALIZATION 5] Generating Helix Logo Plots...")
+        print("\n[VISUALIZATION 6] Generating Helix Logo Plots...")
         if not df_filtered_residue.empty:  # Use df_filtered_residue as per notebook for logos
             try:
                 fig5 = plot_helix_logo_plots(
@@ -743,8 +822,11 @@ def main(args=None):
                 )
                 fig5_path = FIGURES_OUTPUT_DIR / "05_helix_logos_x50.png"
                 fig5.savefig(fig5_path, dpi=300);
+                fig5_path_b = FIGURES_OUTPUT_DIR / "05b_helix_logos_x50.png"
+                fig5.savefig(fig5_path_b, dpi=300);
                 plt.close(fig5)
                 print(f"[SUCCESS] Saved Helix Logo Plots to: {fig5_path}")
+                print(f"[SUCCESS] Saved Helix Logo Plots (05b layout) to: {fig5_path_b}")
             except Exception as e:
                 print(f"[ERROR] Failed to generate Helix Logo Plots: {e}")
                 traceback.print_exc()
@@ -757,7 +839,7 @@ def main(args=None):
     if not args.skip_property_analysis and (args.only is None or args.only == 'property'):
         if 'processed_structures' in data and property_csv_path.exists():
             try:
-                print("\n[VISUALIZATION 6-7] Generating Property Analysis Visualizations...")
+                print("\n[VISUALIZATION 7-8] Generating Property Analysis Visualizations...")
                 create_property_analysis_visualizations(mapper, data['processed_structures'], FIGURES_OUTPUT_DIR)
             except Exception as e:
                 print(f"[ERROR] Failed to generate property analysis visualizations: {e}")
@@ -768,7 +850,7 @@ def main(args=None):
     # Interactive GRN Visualization
     if not args.skip_interactive and (args.only is None or args.only == 'interactive'):
         try:
-            print("\n[VISUALIZATION 8] Generating Interactive GRN Alignment Visualization...")
+            print("\n[VISUALIZATION 9] Generating Interactive GRN Alignment Visualization...")
             # Import the interactive visualization module
             
             interactive_output = FIGURES_OUTPUT_DIR / 'interactive_grn_alignment.html'

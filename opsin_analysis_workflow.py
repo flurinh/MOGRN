@@ -45,7 +45,7 @@ def run_opsin_analysis_workflow(output_dir=None,
     without using PropertyProcessor
     
     Args:
-        output_dir: Directory to save output files. If None, uses projects/opsin_analysis/opsin_output.
+        output_dir: Directory to save outputs files. If None, uses projects/opsin_analysis/opsin_output.
         visualize: Whether to generate visualizations
         use_foldmason: Whether to use FoldMason for structure alignment
         use_cache: Whether to use cached structure data (default: True)
@@ -72,7 +72,7 @@ def run_opsin_analysis_workflow(output_dir=None,
     # Define data directory (where PROTOS data lives)
     data_dir = os.path.join(os.path.dirname(__file__), 'data')
     
-    # Create output directory and cache directory (for analysis results and figures)
+    # Create outputs directory and cache directory (for analysis results and figures)
     os.makedirs(output_dir, exist_ok=True)
     cache_dir = os.path.join(output_dir, 'cache')
     os.makedirs(cache_dir, exist_ok=True)
@@ -80,14 +80,14 @@ def run_opsin_analysis_workflow(output_dir=None,
     # Make sure data directory exists
     os.makedirs(data_dir, exist_ok=True)
     
-    print(f"Using output directory for results and cache: {output_dir}")
+    print(f"Using outputs directory for results and cache: {output_dir}")
     print(f"Using data directory for PROTOS data: {data_dir}")
     
     # Make sure we have the necessary structure directory in data path
     structure_dir = os.path.join(data_dir, 'structure')
     os.makedirs(structure_dir, exist_ok=True)
     
-    # Create output structure directory for results if needed
+    # Create outputs structure directory for results if needed
     structure_output_dir = os.path.join(output_dir, 'structure')
     os.makedirs(structure_output_dir, exist_ok=True)
     
@@ -260,8 +260,8 @@ if __name__ == '__main__':
     
     # Set up command line arguments
     parser = argparse.ArgumentParser(description='Run opsin analysis workflow')
-    parser.add_argument('--output-dir', type=str, default=None,
-                        help='Directory to save output files. If not specified, uses projects/opsin_analysis/opsin_output')
+    parser.add_argument('--outputs-dir', type=str, default=None,
+                        help='Directory to save outputs files. If not specified, uses projects/opsin_analysis/opsin_output')
     parser.add_argument('--no-visualize', action='store_false', dest='visualize',
                         help='Disable visualization generation')
     parser.add_argument('--no-foldmason', action='store_false', dest='use_foldmason',
