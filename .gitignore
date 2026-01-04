@@ -41,3 +41,5 @@ docs/*.html
 # Python cache
 *.pyc
 *.pyo
+
+zenodo_upload
