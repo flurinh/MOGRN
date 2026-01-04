@@ -7,7 +7,7 @@ import os
 import numpy as np
 import pandas as pd
 from scipy.spatial.distance import cdist
-from protos.processing.structure.struct_alignment import get_structure_alignment
+from protos.analysis.structure.alignment import get_structure_alignment
 from Bio.PDB.qcprot import QCPSuperimposer
 from tqdm import tqdm
 import pickle

@@ -5,7 +5,7 @@ These functions handle the identification of reference structures and alignment 
 
 import numpy as np
 import pandas as pd
-from protos.processing.structure.struct_alignment import get_structure_alignment
+from protos.analysis.structure.alignment import get_structure_alignment
 
 
 def create_seq_alignment_dicts_from_paths(alignment_paths, structure_ids, global_ref, type_reference_dict=None):

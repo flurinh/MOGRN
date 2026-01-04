@@ -1,20 +1,25 @@
 """
 Functions for loading, filtering, and preprocessing opsin structure data.
-These functions handle dataset loading, chain extraction, file management, and
-structure rebuilding operations.
+
+NOTE: Most dataset loading functions in this module are DEPRECATED.
+Use the new protos StructureProcessor API instead. See opsin_analysis_workflow.py.
+
+This module retains utility functions like:
+- format_cif_columns
+- ensure_structure_dtypes
 """
 
 import os
 import pandas as pd
 import numpy as np
 from typing import Dict, List, Any, Optional, Union
-from protos.processing.structure.struct_base_processor import CifBaseProcessor
-from protos.processing.structure.struct_utils import load_structure
 from pathlib import Path
 import pickle
 import json
 from tqdm import tqdm
 
+# New protos API
+from protos.processing.structure import StructureProcessor
 from protos.io.paths.path_config import ProtosPaths
 
 
@@ -25,20 +30,26 @@ except ImportError:
     print("[WARNING] Could not import LYR processing utilities. LYR residues will not be processed correctly.")
 
 
-def load_experimental_dataset(dataset_name='mo_exp'):
+def load_experimental_dataset(dataset_name='mo_exp_A'):
     """
-    Load a dataset using CifProcessor
-    
+    Load a dataset using the new StructureProcessor API.
+
+    Available datasets (created by prepare_data.py):
+    - mo_exp_A: Experimental structures Set A (pre-Sept 2021, within Boltz training)
+    - mo_exp_B: Experimental structures Set B (post-Sept 2021) + Hideaki exp
+    - mo_pred_exp: Boltz predictions of experimental structures (63 + 8 Hideaki = 71)
+    - mo_pred_novel: Boltz predictions of novel opsins (~58)
+
     Args:
         dataset_name: Name of the dataset to load
-        
+
     Returns:
-        CifBaseProcessor: Loaded processor with dataset
+        StructureProcessor: Loaded processor with dataset
     """
-    cp = CifBaseProcessor()
-    cp.load_dataset(dataset_name)
-    print(f"[INFO] {dataset_name} loaded with {len(cp.pdb_ids)} structures.")
-    return cp
+    processor = StructureProcessor("dataset_loader")
+    processor.load_dataset(dataset_name)
+    print(f"[INFO] {dataset_name} loaded with {len(processor.structure_ids)} structures.")
+    return processor
 
 def filter_structures_by_chain(cp, chain='A'):
     """

@@ -1,557 +1,687 @@
 #!/usr/bin/env python3
 """
-This script reads opsin property data from CSV file and initializes PROTOS data structure.
-It sets up the necessary datasets for the opsin analysis project.
+Data preparation script for MOGRN (Microbial Opsin Generic Residue Numbering).
+
+This script:
+1. Initializes protos with the project data directory
+2. Loads opsin property metadata from CSV
+3. Registers available structure files (CIF) with protos
+4. Creates 4 datasets:
+   - mo_exp_A: Experimental structures pre-Sept 2021 (within Boltz training window)
+   - mo_exp_B: Experimental structures post-Sept 2021 (true test set)
+   - mo_pred_exp: Boltz predictions of experimental structures
+   - mo_pred_novel: Boltz predictions of experimentally undetermined structures
+5. Creates mapping between experimental PDB IDs and predicted structure IDs
+
+Usage:
+    python prepare_data.py [--rebuild]
 """
 
-import os
-import pandas as pd
-import numpy as np
+import argparse
 import json
-import shutil
-import pandas as pd
-from pathlib import Path
 import sys
+from pathlib import Path
+from typing import Dict, List, Tuple
 
-project_root = Path(__file__).resolve().parent
-sys.path.append(str(project_root))
+import pandas as pd
 
-# Import PROTOS modules
-from protos.io.paths.path_config import ProtosPaths, DataSource
-from protos.processing.structure.struct_base_processor import CifBaseProcessor
+# =============================================================================
+# Project paths
+# =============================================================================
 
+PROJECT_ROOT = Path(__file__).resolve().parent
+DATA_ROOT = PROJECT_ROOT / "data"
+PROPERTY_DIR = PROJECT_ROOT / "property"
+OUTPUT_DIR = PROJECT_ROOT / "opsin_output"
 
-def setup_registry_and_datasets(cp, paths, user_data_root, project_root):
-    """Helper function to setup registry and load datasets"""
-    # Get registry paths for both user and reference data
-    user_registry_path = paths.get_registry_path("structure", DataSource.USER)
-    ref_registry_path = paths.get_registry_path("structure", DataSource.REFERENCE)
+# Structure directories (CIF files are spread across subdirectories)
+# NOTE: clustered_mo is excluded - not part of this analysis
+STRUCTURE_DIRS = [
+    PROJECT_ROOT / "structures" / "mo_pred",       # Predicted structures (~121)
+    PROJECT_ROOT / "structures" / "hideaki_exp",   # Hideaki experimental (8)
+    PROJECT_ROOT / "structures" / "hideaki_pred",  # Hideaki predicted (8)
+    DATA_ROOT / "structure" / "mmcif",             # Downloaded from RCSB (experimental)
+]
 
-    print(f"User registry path: {user_registry_path}")
-    print(f"Reference registry path: {ref_registry_path}")
+# Add protos to path
+PROTOS_SRC = PROJECT_ROOT / "protos" / "src"
+if PROTOS_SRC.exists():
+    sys.path.insert(0, str(PROTOS_SRC))
 
-    # Convert string paths to Path objects if needed
-    if isinstance(user_registry_path, str):
-        user_registry_path = Path(user_registry_path)
-    if isinstance(ref_registry_path, str):
-        ref_registry_path = Path(ref_registry_path)
+# =============================================================================
+# Initialize protos BEFORE importing processors
+# =============================================================================
 
-    # Create registry.json in both user and reference data if they don't exist
-    for reg_path in [ref_registry_path, user_registry_path]:
-        if not reg_path.exists():
-            try:
-                reg_path.parent.mkdir(parents=True, exist_ok=True)
-                with open(reg_path, 'w') as f:
-                    json.dump({"datasets": []}, f)
-                print(f"Created empty registry at {reg_path}")
-            except Exception as e:
-                print(f"Warning: Could not create registry at {reg_path}: {str(e)}")
+import protos
+protos.set_data_path(str(DATA_ROOT))
 
-    # Import existing datasets
-    # Check the legacy dataset location
-    legacy_dataset_path = project_root / "protos" / "data" / "structure" / "structure_dataset" / "datasets.json"
-    if legacy_dataset_path.exists():
-        print(f"Found legacy dataset at: {legacy_dataset_path}")
+from protos.processing.structure import StructureProcessor
+from protos.io.ingest.structure_loader import StructureLoader
 
-        # Create structure directory in reference data using actual paths.ref_data_root
-        ref_data_dir = Path(paths.ref_data_root) if paths.ref_data_root else Path(
-            project_root) / "protos" / "src" / "protos" / "reference_data"
-        struct_dataset_dir = ref_data_dir / "structure" / "structure_dataset"
-        try:
-            struct_dataset_dir.mkdir(parents=True, exist_ok=True)
-        except Exception as e:
-            print(f"Warning: Could not create directory {struct_dataset_dir}: {str(e)}")
+# =============================================================================
+# Configuration
+# =============================================================================
 
-        # Copy the legacy dataset to the reference data directory
-        target_dataset_path = struct_dataset_dir / "datasets.json"
+PROPERTY_FILE = PROPERTY_DIR / "mo_exp_ST1.csv"
 
-        # Also create a copy in the user data directory
-        user_struct_dataset_dir = Path(user_data_root) / "structure" / "structure_dataset"
-        try:
-            user_struct_dataset_dir.mkdir(parents=True, exist_ok=True)
-            user_target_path = user_struct_dataset_dir / "datasets.json"
-            shutil.copy2(legacy_dataset_path, user_target_path)
-            print(f"Also copied dataset to user data: {user_target_path}")
-        except Exception as e:
-            print(f"Warning: Could not copy to user data: {str(e)}")
-        try:
-            shutil.copy2(legacy_dataset_path, target_dataset_path)
-            print(f"Copied legacy dataset to: {target_dataset_path}")
-        except Exception as e:
-            print(f"Could not copy dataset file: {str(e)}")
-            # If we can't copy, we'll just read from the original
+# Dataset definitions based on the split logic:
+#
+# EXPERIMENTAL STRUCTURES (from mo_exp.csv rows with experimentally_determined=1):
+#   - mo_exp_A: Set A = pre-Sept 2021 (within Boltz training window)
+#   - mo_exp_B: Set B = post-Sept 2021 (true test set) + Hideaki experimental
+#
+# PREDICTED STRUCTURES (Boltz-1 predictions):
+#   - mo_pred_exp: Predictions of experimental structures (63 from mo_exp.csv + 8 Hideaki = 71)
+#   - mo_pred_novel: Predictions of novel opsins (134 - 71 = 63, minus 5 missing files = 58)
+#
+# Note: Hideaki structures are in mo_exp.csv with short_name like 'A1ACR1' but marked
+# as experimentally_determined=0 (incorrectly). They map to hideaki_pred files with
+# naming like 'A1ACR1_J318_refine3_model_0'.
 
-        # Load datasets from the file (falling back to original if needed)
-        try:
-            dataset_file_to_read = target_dataset_path if target_dataset_path.exists() else legacy_dataset_path
-            with open(dataset_file_to_read, 'r') as f:
-                datasets_dict = json.load(f)
-                print(f"Successfully loaded datasets from {dataset_file_to_read}")
-        except Exception as e:
-            print(f"Error reading datasets file: {str(e)}")
-            datasets_dict = {}
-
-        # Update the registry with the available datasets
-        # First, create a standardized datasets file that matches the expected format
-        print("Converting legacy dataset format to standardized format...")
-
-        # Create a directory for standardized datasets
-        std_dataset_dir = struct_dataset_dir / "standard"
-        std_dataset_dir.mkdir(parents=True, exist_ok=True)
-
-        # Create a dataset file for each dataset in the legacy format
-        registry_data = {"datasets": []}
-        for dataset_name, pdb_ids in datasets_dict.items():
-            # Create a standardized dataset file
-            std_dataset_path = std_dataset_dir / f"{dataset_name}.json"
-
-            # Format the dataset as a dictionary with metadata and pdb_ids array
-            std_dataset = {
-                "id": dataset_name,
-                "name": dataset_name,
-                "description": f"Dataset containing {len(pdb_ids)} structures",
-                "type": "structure",
-                "pdb_ids": pdb_ids
-            }
-
-            # Write the standardized dataset file
-            with open(std_dataset_path, 'w') as f:
-                json.dump(std_dataset, f, indent=2)
-            print(f"Created standardized dataset file: {std_dataset_path}")
-
-            # Add to registry
-            registry_data["datasets"].append({
-                "id": dataset_name,
-                "path": str(std_dataset_path),
-                "type": "json"
-            })
-
-        # Save the updated registry to both reference and user data
-        for reg_path in [ref_registry_path, user_registry_path]:
-            try:
-                with open(reg_path, 'w') as f:
-                    json.dump(registry_data, f, indent=2)
-                print(f"Updated registry at {reg_path}")
-            except Exception as e:
-                print(f"Warning: Could not update registry at {reg_path}: {str(e)}")
-
-        # Also directly update the processor's registry
-        if hasattr(cp, "registry"):
-            cp.registry = registry_data
-            print("Updated processor registry directly")
-
-        # Reinitialize the processor to pick up the new registry
-        try:
-            cp.__init__(
-                name="opsin_processor",
-                data_root=str(user_data_root),  # Convert Path to string for processor
-                processor_data_dir="structure",  # Standard subdirectory
-                preload=False  # Don't load PDB IDs on init
-            )
-            print("Reinitialized processor to pick up new registry")
-        except Exception as e:
-            print(f"Error reinitializing processor: {str(e)}")
+# Hideaki short_names in mo_exp.csv - these map to hideaki_exp/hideaki_pred (different naming)
+HIDEAKI_SHORT_NAMES = {'A1ACR1', 'ChroME2s', 'CnChR2', 'CoChR', 'KnChR', 'R2ACR', 'TsChR', 'bReaChES'}
 
 
-def setup_processor(user_data_root):
-    """
-    Set up the CifBaseProcessor with proper path resolution
-    """
-    print("=== Setting up CifBaseProcessor with Modern Path Resolution ===")
-
-    # Ensure user_data_root is a Path object and is absolute
-    if isinstance(user_data_root, str):
-        user_data_root = Path(user_data_root)
-    user_data_root = user_data_root.resolve()
-    
-    print(f"Using user_data_root: {user_data_root}")
-    
-    # Let ProtosPaths find the reference data root by passing None
-    # This will use the appropriate default or environment variable
-    ref_data_root = None
-    
-    # Create an instance of ProtosPaths with proper settings
-    paths = ProtosPaths(
-        user_data_root=str(user_data_root),  # Convert to string as expected by ProtosPaths
-        ref_data_root=ref_data_root,
-        create_dirs=True,  # Create directories that don't exist
-        validate=True      # Validate directory structure (shows warnings for missing directories)
-    )
-
-    print(f"ProtosPaths initialized:")
-    print(f"  User data root: {paths.user_data_root}")
-    print(f"  Reference data root: {paths.ref_data_root}")
-
-    # Initialize the processor with modern path parameters
-    # Note: BaseProcessor internally creates its own ProtosPaths instance
-    # using the user_data_root we provide
-    cp = CifBaseProcessor(
-        name="opsin_processor",
-        data_root=str(user_data_root),  # Convert to string as expected by CifBaseProcessor
-        processor_data_dir="structure",  # Standard subdirectory
-        preload=False  # Don't load PDB IDs on init
-    )
-
-    # Set up registry and datasets
-    setup_registry_and_datasets(cp, paths, user_data_root, project_root)
-
-    return cp, paths
-
-def process_local_dataset(cp, dataset_name, dataset_info, user_data_root):
-    """Process structures from local files"""
-
-    # Convert relative path to absolute
-    source_path = Path(dataset_info['source_path'])
-    if not source_path.is_absolute():
-        source_path = Path(project_root) / source_path
-    
-    if not source_path.exists():
-        print(f"Source path not found: {source_path}")
-        return
-
-    # Get all CIF files
-    cif_files = list(source_path.glob("*.cif"))
-    if not cif_files:
-        print(f"No CIF files found in {source_path}")
-        return
-
-    print(f"Found {len(cif_files)} CIF files for {dataset_name}")
-
-    # Create the destination directory in the PROTOS structure
-    mmcif_dir = user_data_root / "structure" / "mmcif"
-    mmcif_dir.mkdir(exist_ok=True, parents=True)
-
-    # Copy files to the PROTOS structure directory
-    pdb_ids = []
-    successful_copies = 0
-    
-    for cif_file in cif_files:
-        # Generate a PROTOS-compatible ID - prevent scientific notation conversion
-        pdb_id = cif_file.stem
-        
-        # Check if PDB ID could be interpreted as scientific notation
-        if any(c.lower() == 'e' for c in pdb_id):
-            print(f"Warning: PDB ID '{pdb_id}' contains 'e' and may be interpreted as scientific notation")
-        
-        # Copy the file to the PROTOS directory - ensure exact filename is preserved
-        dest_file = mmcif_dir / cif_file.name
-        try:
-            # Only copy if target doesn't exist or is older
-            if not dest_file.exists() or (cif_file.stat().st_mtime > dest_file.stat().st_mtime):
-                shutil.copy2(cif_file, dest_file)
-                print(f"Copied {cif_file.name} to {dest_file}")
-                successful_copies += 1
-            else:
-                print(f"Skipped {cif_file.name} (already exists and is up to date)")
-            
-            # Only add to the list if copy was successful or file already exists
-            pdb_ids.append(pdb_id)
-        except Exception as e:
-            print(f"Error copying {cif_file.name}: {e}")
-
-    print(f"Copied {successful_copies} files, skipped {len(cif_files) - successful_copies} files")
-    
-    if not pdb_ids:
-        print(f"No structures were successfully copied for {dataset_name}")
-        return
-        
-    # Load structures into the processor
-    try:
-        # Reset processor to ensure a clean state
-        cp.reset_data()
-        
-        # Ensure PDB IDs are preserved as strings (not converted to scientific notation)
-        pdb_ids_str = [str(pdb_id) for pdb_id in pdb_ids]
-        
-        # Check for potential scientific notation issues
-        for pdb_id in pdb_ids_str:
-            if any(c.lower() == 'e' for c in pdb_id):
-                print(f"Warning: PDB ID '{pdb_id}' may be interpreted as scientific notation")
-        
-        # Load the structures
-        cp.load_structures(pdb_ids_str)
-        
-        # Check if any structures were loaded
-        if len(cp.pdb_ids) > 0:
-            # Create dataset with standardized metadata
-            metadata = {
-                "description": dataset_info.get('description', ''),
-                "source": dataset_info.get('source_path', ''),
-                "creation_date": pd.Timestamp.now().strftime('%Y-%m-%d'),
-                "structures_count": len(cp.pdb_ids)
-            }
-            
-            # Create the dataset with metadata
-            cp.create_dataset(
-                dataset_id=dataset_name,
-                name=dataset_name,
-                description=metadata['description'],
-                content=cp.pdb_ids,
-                metadata=metadata
-            )
-            
-            # Create a standardized dataset file as well
-            dataset_dir = user_data_root / "structure" / "structure_dataset" / "standard"
-            dataset_dir.mkdir(exist_ok=True, parents=True)
-            
-            std_dataset_path = dataset_dir / f"{dataset_name}.json"
-            std_dataset = {
-                "id": dataset_name,
-                "name": dataset_name,
-                "description": metadata['description'],
-                "type": "structure",
-                "pdb_ids": pdb_ids,
-                "metadata": metadata
-            }
-            
-            with open(std_dataset_path, 'w') as f:
-                json.dump(std_dataset, f, indent=2)
-                
-            print(f"Successfully saved dataset {dataset_name} with {len(cp.pdb_ids)} structures")
-            print(f"Created standardized dataset file: {std_dataset_path}")
-        else:
-            print(f"No structures were successfully loaded for {dataset_name}")
-    except Exception as e:
-        print(f"Error processing dataset {dataset_name}: {e}")
+def is_hideaki_entry(row) -> bool:
+    """Check if a row is a Hideaki entry based on short_name."""
+    short_name = str(row.get("short_name", "")).strip()
+    return short_name in HIDEAKI_SHORT_NAMES
 
 
-def process_downloadable_dataset(cp, dataset_name, dataset_info):
-    """Process structures that need to be downloaded from PDB"""
+def is_experimental_entry(row) -> bool:
+    """Check if entry is experimental (has experimentally_determined=1 OR is Hideaki)."""
+    exp_determined = row.get("experimentally_determined", None)
+    return (exp_determined == 1) or is_hideaki_entry(row)
 
-    pdb_ids = dataset_info.get('pdb_ids', [])
-    if not pdb_ids:
-        print(f"No PDB IDs provided for {dataset_name}")
-        return
 
-    print(f"Downloading {len(pdb_ids)} structures for {dataset_name}")
+DATASET_CONFIGS = {
+    "mo_exp_A": {
+        "description": "Experimental microbial opsin structures - Set A (pre-Sept 2021, within Boltz training)",
+        "filter": lambda row: (
+            row.get("experimentally_determined", 0) == 1 and
+            row.get("dataset_split", "") == "A"
+        ),
+        "use_pdb_id": True,  # Use lowercase PDB ID as structure_id
+        "include_hideaki": False,
+    },
+    "mo_exp_B": {
+        "description": "Experimental microbial opsin structures - Set B (post-Sept 2021, true test set) + Hideaki exp",
+        "filter": lambda row: (
+            row.get("experimentally_determined", 0) == 1 and
+            row.get("dataset_split", "") == "B"
+        ),
+        "use_pdb_id": True,
+        "include_hideaki": True,  # Hideaki exp structures are part of Set B
+        "hideaki_source": "hideaki_exp",
+    },
+    "mo_pred_exp": {
+        "description": "Boltz-1 predictions of experimental microbial opsin structures (63 + 8 Hideaki = 71)",
+        # Filter: experimentally_determined=1 OR is Hideaki entry
+        "filter": is_experimental_entry,
+        "use_pdb_id": False,  # Use short_name + _model_0
+        "include_hideaki": True,  # Include hideaki predictions (different naming)
+        "hideaki_source": "hideaki_pred",
+        "exclude_hideaki_from_filter": True,  # Don't add short_name_model_0 for Hideaki
+    },
+    "mo_pred_novel": {
+        "description": "Boltz-1 predictions of novel microbial opsins (no experimental counterpart, ~58)",
+        # Filter: NOT experimental (excludes experimentally_determined=1 AND Hideaki entries)
+        "filter": lambda row: not is_experimental_entry(row),
+        "use_pdb_id": False,  # Use short_name + _model_0
+        "include_hideaki": False,  # Hideaki predictions are in mo_pred_exp
+    },
+}
 
-    # Reset processor to ensure clean state
-    cp.reset_data()
 
-    # Track successful downloads
-    successful_ids = []
-    
-    # Download structures in batches to avoid timeout issues
-    batch_size = 10
-    total_batches = (len(pdb_ids) + batch_size - 1) // batch_size
-    
-    for i in range(0, len(pdb_ids), batch_size):
-        batch = pdb_ids[i:i + batch_size]
-        batch_num = i // batch_size + 1
-        print(f"Processing batch {batch_num}/{total_batches} [{len(batch)} structures]")
+# =============================================================================
+# Property Data Loading
+# =============================================================================
 
-        try:
-            # Create a temporary dataset with these IDs
-            temp_dataset_name = f"{dataset_name}_temp_{batch_num}"
-            
-            # Create dataset with batch IDs
-            cp.reset_data()
-            for pdb_id in batch:
-                if pdb_id not in cp.pdb_ids:
-                    cp.pdb_ids.append(pdb_id)
-            
-            # Create temporary dataset
-            cp.create_dataset(
-                dataset_id=temp_dataset_name,
-                name=temp_dataset_name,
-                description="Temporary batch for downloading",
-                content=batch
-            )
-            
-            # Download missing CIFs for this dataset 
-            downloaded = cp.check_and_download_missing_cifs(temp_dataset_name)
-            
-            # Reload the batch to make sure we have the actual data
-            cp.reset_data()
-            
-            # Ensure batch PDB IDs are preserved as strings (not converted to scientific notation)
-            batch_str = [str(pdb_id) for pdb_id in batch]
-            
-            # Check for potential scientific notation issues
-            for pdb_id in batch_str:
-                if any(c.lower() == 'e' for c in pdb_id):
-                    print(f"Warning: PDB ID '{pdb_id}' may be interpreted as scientific notation")
-            
-            cp.load_structures(batch_str)
-            
-            # Check which ones were successfully loaded
-            batch_successful = [pdb_id for pdb_id in batch if pdb_id in cp.pdb_ids]
-            successful_ids.extend(batch_successful)
-            
-            if batch_successful:
-                print(f"Successfully downloaded {len(batch_successful)}/{len(batch)} structures in batch {batch_num}")
-            else:
-                print(f"Failed to download structures in batch {batch_num}")
-                
-        except Exception as e:
-            print(f"Error downloading batch {batch_num}: {e}")
+def load_property_data(property_file: Path = PROPERTY_FILE) -> pd.DataFrame:
+    """Load and clean the opsin property CSV."""
+    print(f"[INFO] Loading property data from: {property_file}")
 
-    # After downloading all structures, save the dataset if any were successful
-    if successful_ids:
-        try:
-            # Create dataset with standardized metadata
-            metadata = {
-                "description": dataset_info.get('description', ''),
-                "source": "RCSB PDB",
-                "creation_date": pd.Timestamp.now().strftime('%Y-%m-%d'),
-                "structures_count": len(successful_ids),
-                "original_count": len(pdb_ids),
-                "success_rate": f"{len(successful_ids)}/{len(pdb_ids)} ({100 * len(successful_ids) / len(pdb_ids):.1f}%)"
-            }
-            
-            # Create the dataset with metadata
-            cp.create_dataset(
-                dataset_id=dataset_name,
-                name=dataset_name,
-                description=metadata['description'],
-                content=successful_ids,
-                metadata=metadata
-            )
-            
-            # Create a standardized dataset file as well
-            user_data_root = Path(cp.data_root)
-            dataset_dir = user_data_root / "structure" / "structure_dataset" / "standard"
-            dataset_dir.mkdir(exist_ok=True, parents=True)
-            
-            std_dataset_path = dataset_dir / f"{dataset_name}.json"
-            std_dataset = {
-                "id": dataset_name,
-                "name": dataset_name,
-                "description": metadata['description'],
-                "type": "structure",
-                "pdb_ids": successful_ids,
-                "metadata": metadata
-            }
-            
-            with open(std_dataset_path, 'w') as f:
-                json.dump(std_dataset, f, indent=2)
-                
-            print(f"Successfully saved dataset {dataset_name} with {len(successful_ids)} structures")
-            print(f"Created standardized dataset file: {std_dataset_path}")
-        except Exception as e:
-            print(f"Error saving dataset {dataset_name}: {e}")
+    if not property_file.exists():
+        raise FileNotFoundError(f"Property file not found: {property_file}")
+
+    # Read with dtype=str for PDB ID to avoid scientific notation parsing (e.g., 1E12 -> 1.00E+12)
+    df = pd.read_csv(property_file, dtype={"PDB ID": str})
+    print(f"[INFO] Loaded {len(df)} entries from property file")
+
+    df.columns = df.columns.str.strip()
+
+    # Clean up dataset_split column
+    if "dataset_split" in df.columns:
+        df["dataset_split"] = df["dataset_split"].fillna("unknown").astype(str).str.strip()
     else:
-        print(f"No structures were successfully downloaded for {dataset_name}")
-        print(f"Dataset {dataset_name} not created")
+        df["dataset_split"] = "unknown"
+
+    # Fix Excel scientific notation issue (e.g., 1E12 -> 1.00E+12)
+    # PDB IDs are always 4 characters
+    if "PDB ID" in df.columns:
+        def fix_pdb_id(val):
+            if pd.isna(val):
+                return val
+            s = str(val).strip()
+            # Check for scientific notation pattern like "1.00E+12" which should be "1E12"
+            if "E+" in s.upper() or "E-" in s.upper():
+                # Extract the base and exponent, reconstruct as PDB ID
+                import re
+                match = re.match(r"(\d+)\.?\d*[Ee][+]?(\d+)", s)
+                if match:
+                    base = match.group(1)
+                    exp = match.group(2)
+                    return f"{base}E{exp}"
+            return s
+        df["PDB ID"] = df["PDB ID"].apply(fix_pdb_id)
+
+    # Create structure IDs for both experimental (PDB ID) and predicted (short_name + _model_0)
+    def get_exp_structure_id(row):
+        """Get experimental structure ID (lowercase PDB ID)."""
+        pdb_id = row.get("PDB ID", row.get("pdb_id", ""))
+        if pd.notna(pdb_id) and str(pdb_id).strip():
+            return str(pdb_id).strip().lower()
+        return ""
+
+    def get_pred_structure_id(row):
+        """Get predicted structure ID (short_name + _model_0)."""
+        short_name = row.get("short_name", "")
+        if pd.notna(short_name) and str(short_name).strip():
+            return str(short_name).strip() + "_model_0"
+        return ""
+
+    df["exp_structure_id"] = df.apply(get_exp_structure_id, axis=1)
+    df["pred_structure_id"] = df.apply(get_pred_structure_id, axis=1)
+
+    # Summary statistics
+    exp_count = (df["experimentally_determined"] == 1).sum()
+    pred_count = (df["experimentally_determined"] == 0).sum()
+    set_a_count = ((df["experimentally_determined"] == 1) & (df["dataset_split"] == "A")).sum()
+    set_b_count = ((df["experimentally_determined"] == 1) & (df["dataset_split"] == "B")).sum()
+
+    print(f"[INFO] Total entries: {len(df)}")
+    print(f"[INFO] Experimental entries: {exp_count}")
+    print(f"[INFO]   - Set A (pre-Sept 2021): {set_a_count}")
+    print(f"[INFO]   - Set B (post-Sept 2021): {set_b_count}")
+    print(f"[INFO] Novel/undetermined entries: {pred_count}")
+
+    return df
 
 
-def validate_datasets(cp, datasets, user_data_root):
-    """Validate that all datasets were created properly"""
+def create_structure_mapping(
+    property_df: pd.DataFrame,
+    available_structures: Dict[str, Path]
+) -> Dict[str, str]:
+    """Create mapping between experimental PDB IDs and predicted structure IDs.
 
-    print("\n=== Validating Datasets ===")
-    
-    # List available datasets
-    try:
-        # Get the list of dataset names from registry
-        if hasattr(cp, "registry") and "datasets" in cp.registry:
-            available_datasets = [d["id"] for d in cp.registry["datasets"] if "id" in d]
-        else:
-            available_datasets = []
-        
-        print(f"Available datasets: {available_datasets}")
-    except Exception as e:
-        print(f"Error listing datasets: {e}")
-        return
+    Maps: pdb_id (lowercase) -> short_name_model_0
 
-    for dataset_name in datasets:
-        if dataset_name in available_datasets:
-            # Try loading the dataset to verify it's accessible
-            cp.reset_data()
-            try:
-                # Load the dataset
-                cp.load_dataset(dataset_name)
-                print(f"Dataset {dataset_name} loaded successfully with {len(cp.pdb_ids)} structures")
-            except Exception as e:
-                print(f"Error loading dataset {dataset_name}: {e}")
-        else:
-            print(f"Dataset {dataset_name} not found in available datasets")
-            
-            # Check if the standard dataset file exists directly
-            std_dataset_path = user_data_root / "structure" / "structure_dataset" / "standard" / f"{dataset_name}.json"
-            if std_dataset_path.exists():
-                print(f"Standard dataset file exists at {std_dataset_path} but it's not registered in the processor")
+    Args:
+        property_df: Property dataframe with exp_structure_id and pred_structure_id columns
+        available_structures: Dict of available structure IDs
 
-def main():
+    Returns:
+        Dict mapping pdb_id -> pred_structure_id (for all experimental entries with predictions)
     """
-    Main function for setting up opsin analysis datasets
+    available_set = set(available_structures.keys())
+    mapping = {}
+
+    # Create mappings for experimental structures from property file
+    # Map: pdb_id -> short_name_model_0
+    exp_df = property_df[property_df["experimentally_determined"] == 1]
+
+    for _, row in exp_df.iterrows():
+        exp_id = row["exp_structure_id"]  # lowercase pdb_id
+        pred_id = row["pred_structure_id"]  # short_name_model_0
+
+        # Only require that the prediction file exists
+        if exp_id and pred_id and pred_id in available_set:
+            mapping[exp_id] = pred_id
+
+    print(f"[INFO] Created {len(mapping)} PDB ID -> prediction mappings from mo_exp.csv")
+
+    # Also add Hideaki structure mappings
+    # These use different naming: A1ACR1_J318_refine3 -> A1ACR1_J318_refine3_model_0
+    hideaki_exp_dir = PROJECT_ROOT / "structures" / "hideaki_exp"
+    hideaki_pred_dir = PROJECT_ROOT / "structures" / "hideaki_pred"
+
+    hideaki_count = 0
+    if hideaki_exp_dir.exists() and hideaki_pred_dir.exists():
+        for exp_file in hideaki_exp_dir.glob("*.cif"):
+            exp_id = exp_file.stem
+            pred_id = exp_id + "_model_0"
+            if pred_id in available_set:
+                mapping[exp_id] = pred_id
+                hideaki_count += 1
+
+    print(f"[INFO] Added {hideaki_count} Hideaki structure mappings")
+    print(f"[INFO] Total structure mapping pairs: {len(mapping)}")
+    return mapping
+
+
+# =============================================================================
+# Structure Download and Discovery
+# =============================================================================
+
+def download_experimental_structures(
+    loader: StructureLoader,
+    property_df: pd.DataFrame,
+    available_structures: Dict[str, Path],
+) -> Dict[str, bool]:
+    """Download missing experimental structures from RCSB.
+
+    Args:
+        loader: StructureLoader instance
+        property_df: Property dataframe with exp_structure_id column
+        available_structures: Currently available structures
+
+    Returns:
+        Dict mapping pdb_id to success status
     """
-    # Initialize paths and data - use absolute paths
-    project_root = Path(__file__).resolve().parent
-    user_data_root = project_root / "data"
-    
-    # Ensure user_data_root exists
-    user_data_root.mkdir(parents=True, exist_ok=True)
+    available_set = set(available_structures.keys())
 
-    # Setup processor with proper error handling
-    try:
-        cp, paths = setup_processor(user_data_root)
-        print("\n=== CifBaseProcessor Setup Complete ===")
-        print(f"Processor type: {type(cp).__name__}")
-        print(f"User data root: {paths.user_data_root}")
-        print(f"Reference data root: {paths.ref_data_root}")
-    except Exception as e:
-        print(f"Failed to initialize processor: {e}")
-        return
+    # Get all experimental PDB IDs that need to be downloaded
+    exp_df = property_df[property_df["experimentally_determined"] == 1]
+    pdb_ids_needed = []
 
-    # Read property data using the improved function
-    try:
-        excel_path = project_root / "property" / "mo_exp.xlsx"
-        df = pd.read_excel(excel_path)
-        print(f"\n=== Property Data ===")
-        print(f"Unique PDB IDs: {len(df['pdb_id'].unique())}")
-    except Exception as e:
-        print(f"Error reading property data: {e}")
-        return
+    for _, row in exp_df.iterrows():
+        pdb_id = row["exp_structure_id"]
+        if pdb_id and pdb_id not in available_set:
+            pdb_ids_needed.append(pdb_id)
 
-    # Ensure required directories exist
-    mmcif_dir = user_data_root / "structure" / "mmcif"
-    dataset_dir = user_data_root / "structure" / "structure_dataset"
-    standard_dir = dataset_dir / "standard"
-    
-    for directory in [mmcif_dir, dataset_dir, standard_dir]:
-        directory.mkdir(exist_ok=True, parents=True)
-        print(f"Ensured directory exists: {directory}")
+    if not pdb_ids_needed:
+        print("[INFO] All experimental structures already available")
+        return {}
 
-    # Process all four datasets with proper error handling
-    datasets = {
-        'mo_exp': {
-            'description': 'Experimental microbial opsin structures',
-            'pdb_ids': df['pdb_id'].dropna().unique().tolist(),
-            'source_type': 'download'
-        },
-        'mo_pred': {
-            'description': 'Predicted microbial opsin structures',
-            'source_path': 'structures/mo_pred',  # Relative to project_root
-            'source_type': 'local'
-        },
-        'hideaki_exp': {
-            'description': 'Experimental structures from Hideaki dataset',
-            'source_path': 'structures/hideaki_exp',  # Relative to project_root
-            'source_type': 'local'
-        },
-        'hideaki_pred': {
-            'description': 'Predicted structures from Hideaki dataset',
-            'source_path': 'structures/hideaki_pred',  # Relative to project_root
-            'source_type': 'local'
+    print(f"\n[INFO] Downloading {len(pdb_ids_needed)} experimental structures from RCSB...")
+
+    results = {}
+    for pdb_id in pdb_ids_needed:
+        try:
+            # Download from RCSB and register
+            loader.download_and_register(
+                pdb_id,
+                source="rcsb",
+                metadata={"source": "rcsb", "type": "experimental"},
+            )
+            results[pdb_id] = True
+            print(f"  [OK] Downloaded: {pdb_id}")
+        except Exception as e:
+            results[pdb_id] = False
+            print(f"  [WARN] Failed to download {pdb_id}: {e}")
+
+    success_count = sum(1 for v in results.values() if v)
+    print(f"[INFO] Downloaded {success_count}/{len(pdb_ids_needed)} structures from RCSB")
+
+    return results
+
+
+def scan_available_structures(structure_dirs: List[Path] = None) -> Dict[str, Path]:
+    """Scan all structure directories for available CIF files.
+
+    Returns:
+        Dict mapping structure_id to file path
+    """
+    if structure_dirs is None:
+        structure_dirs = STRUCTURE_DIRS
+
+    print(f"[INFO] Scanning for structures in {len(structure_dirs)} directories...")
+
+    structures = {}
+    for struct_dir in structure_dirs:
+        if not struct_dir.exists():
+            print(f"[WARN] Directory does not exist: {struct_dir}")
+            continue
+
+        cif_files = list(struct_dir.glob("*.cif"))
+        for cif_file in cif_files:
+            structures[cif_file.stem] = cif_file
+
+        print(f"[INFO]   {struct_dir.name}: {len(cif_files)} CIF files")
+
+    print(f"[INFO] Total: {len(structures)} CIF files found")
+    return structures
+
+
+def register_structures(
+    processor: StructureProcessor,
+    loader: StructureLoader,
+    structure_paths: Dict[str, Path],
+    force: bool = False
+) -> Dict[str, bool]:
+    """Register all structures with protos."""
+    print(f"\n[INFO] Registering {len(structure_paths)} structures...")
+
+    results = {}
+    registered = 0
+    skipped = 0
+
+    for struct_id, cif_path in structure_paths.items():
+        # Check if already registered
+        if not force and processor.entity_registry.find_entity(struct_id, "structure"):
+            results[struct_id] = True
+            skipped += 1
+            continue
+
+        try:
+            loader.download_and_register(
+                str(cif_path),
+                name=struct_id,
+                source="local",
+                metadata={
+                    "source": "mogrn",
+                    "file": str(cif_path),
+                    "source_dir": cif_path.parent.name,
+                },
+            )
+            results[struct_id] = True
+            registered += 1
+        except Exception as e:
+            print(f"[WARN] Failed to register {struct_id}: {e}")
+            results[struct_id] = False
+
+    print(f"[INFO] Registered {registered} new, skipped {skipped} existing")
+
+    return results
+
+
+# =============================================================================
+# Dataset Creation
+# =============================================================================
+
+def create_datasets(
+    processor: StructureProcessor,
+    property_df: pd.DataFrame,
+    available_structures: Dict[str, Path],
+    force: bool = False
+) -> Dict[str, int]:
+    """Create the 4 datasets based on property filters."""
+    print("\n" + "=" * 60)
+    print("CREATING DATASETS")
+    print("=" * 60)
+
+    available_set = set(available_structures.keys())
+    results = {}
+    created_datasets = {}  # Store content of created datasets for complement logic
+
+    for dataset_name, config in DATASET_CONFIGS.items():
+        print(f"\n[INFO] Processing dataset: {dataset_name}")
+
+        # Check if dataset exists
+        if not force and processor.dataset_manager.dataset_exists(dataset_name):
+            existing = processor.dataset_manager.get_dataset_entities(dataset_name)
+            print(f"[INFO] Dataset exists with {len(existing)} entities (use --rebuild to recreate)")
+            results[dataset_name] = len(existing)
+            created_datasets[dataset_name] = existing
+            continue
+
+        # Build content list
+        content = []
+        filter_func = config.get("filter")
+
+        if filter_func is not None:
+            use_pdb_id = config.get("use_pdb_id", False)
+            exclude_hideaki = config.get("exclude_hideaki_from_filter", False)
+
+            for _, row in property_df.iterrows():
+                row_dict = row.to_dict()
+                if not filter_func(row_dict):
+                    continue
+
+                # Skip Hideaki entries when building content from filter
+                # (they'll be added via include_hideaki with correct naming)
+                if exclude_hideaki and is_hideaki_entry(row_dict):
+                    continue
+
+                # Select appropriate structure ID based on dataset type
+                if use_pdb_id:
+                    struct_id = row["exp_structure_id"]
+                else:
+                    struct_id = row["pred_structure_id"]
+
+                if struct_id and struct_id in available_set:
+                    content.append(struct_id)
+
+        # Add Hideaki structures if configured
+        if config.get("include_hideaki", False):
+            hideaki_source = config.get("hideaki_source", "")
+            hideaki_dir = PROJECT_ROOT / "structures" / hideaki_source
+            if hideaki_dir.exists():
+                hideaki_ids = [f.stem for f in hideaki_dir.glob("*.cif")]
+                for struct_id in hideaki_ids:
+                    if struct_id in available_set and struct_id not in content:
+                        content.append(struct_id)
+                print(f"[INFO]   Added {len(hideaki_ids)} Hideaki structures from {hideaki_source}")
+
+        if not content:
+            print(f"[WARN] No structures found for dataset: {dataset_name}")
+            results[dataset_name] = 0
+            continue
+
+        # Delete existing if rebuilding
+        if force and processor.dataset_manager.dataset_exists(dataset_name):
+            processor.dataset_manager.delete_dataset(dataset_name)
+            print(f"[INFO] Deleted existing dataset: {dataset_name}")
+
+        # Create dataset
+        try:
+            processor.create_dataset(
+                dataset_name,
+                content,
+                {"description": config["description"], "source": "mogrn"},
+            )
+            print(f"[OK] Created dataset: {dataset_name} ({len(content)} structures)")
+            results[dataset_name] = len(content)
+            created_datasets[dataset_name] = content
+        except Exception as e:
+            print(f"[ERROR] Failed to create dataset {dataset_name}: {e}")
+            results[dataset_name] = 0
+
+    return results
+
+
+# =============================================================================
+# Main
+# =============================================================================
+
+def main(rebuild: bool = False, download: bool = False):
+    """Main entry point for data preparation.
+
+    Args:
+        rebuild: Force rebuild of existing datasets
+        download: Download missing experimental structures from RCSB
+    """
+    print("\n" + "=" * 60)
+    print("MOGRN DATA PREPARATION")
+    print("=" * 60)
+    print(f"Project root: {PROJECT_ROOT}")
+    print(f"Data root: {DATA_ROOT}")
+    print(f"Protos data path: {protos.get_data_path()}")
+    print("=" * 60 + "\n")
+
+    # Create processor and loader
+    print("[INFO] Initializing StructureProcessor...")
+    processor = StructureProcessor("mogrn")
+    loader = StructureLoader(processor=processor)
+
+    # Load property data
+    property_df = load_property_data()
+
+    # Scan available structures (returns dict: structure_id -> file_path)
+    available_structures = scan_available_structures()
+
+    # Download missing experimental structures from RCSB if requested
+    if download:
+        download_results = download_experimental_structures(loader, property_df, available_structures)
+        # Re-scan to include newly downloaded structures
+        if any(download_results.values()):
+            # Also scan the protos mmcif directory for downloaded files
+            protos_mmcif = DATA_ROOT / "structure" / "mmcif"
+            if protos_mmcif.exists():
+                for cif_file in protos_mmcif.glob("*.cif"):
+                    if cif_file.stem not in available_structures:
+                        available_structures[cif_file.stem] = cif_file
+            print(f"[INFO] Updated available structures: {len(available_structures)}")
+
+    # Register structures
+    register_structures(processor, loader, available_structures, force=rebuild)
+
+    # Create datasets
+    dataset_counts = create_datasets(processor, property_df, available_structures, force=rebuild)
+
+    # Create and save structure mapping (exp_id -> pred_id)
+    structure_mapping = create_structure_mapping(property_df, available_structures)
+
+    # Save mapping to JSON
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    mapping_file = OUTPUT_DIR / "structure_mapping.json"
+    with open(mapping_file, "w") as f:
+        json.dump(structure_mapping, f, indent=2)
+    print(f"\n[INFO] Saved structure mapping to: {mapping_file}")
+
+    # Validate datasets and print detailed summary
+    print("\n" + "=" * 60)
+    print("DATASET VALIDATION")
+    print("=" * 60)
+
+    # Build property lookup by various IDs
+    property_by_pdb = {}  # pdb_id -> row
+    property_by_pred = {}  # pred_structure_id -> row
+    property_by_short = {}  # short_name -> row
+
+    for _, row in property_df.iterrows():
+        exp_id = row.get("exp_structure_id", "")
+        pred_id = row.get("pred_structure_id", "")
+        short_name = str(row.get("short_name", "")).strip()
+
+        if exp_id:
+            property_by_pdb[exp_id] = row
+        if pred_id:
+            property_by_pred[pred_id] = row
+        if short_name:
+            property_by_short[short_name] = row
+
+    # Hideaki mapping: hideaki file stem -> short_name in property file
+    hideaki_exp_dir = PROJECT_ROOT / "structures" / "hideaki_exp"
+    hideaki_to_short = {}
+    if hideaki_exp_dir.exists():
+        for f in hideaki_exp_dir.glob("*.cif"):
+            # e.g., A1ACR1_J318_refine3 -> A1ACR1
+            stem = f.stem
+            prefix = stem.split("_")[0]
+            if prefix in HIDEAKI_SHORT_NAMES:
+                hideaki_to_short[stem] = prefix
+                hideaki_to_short[stem + "_model_0"] = prefix
+
+    dataset_details = {}
+
+    for dataset_name in ["mo_exp_A", "mo_exp_B", "mo_pred_exp", "mo_pred_novel"]:
+        if not processor.dataset_manager.dataset_exists(dataset_name):
+            print(f"\n[WARN] Dataset {dataset_name} does not exist")
+            continue
+
+        entities = processor.dataset_manager.get_dataset_entities(dataset_name)
+        n_entities = len(entities)
+
+        # Check prediction mapping (for experimental datasets)
+        mapped_to_pred = 0
+        mapped_to_props = 0
+
+        for entity_id in entities:
+            # Check prediction mapping
+            if entity_id in structure_mapping:
+                mapped_to_pred += 1
+            elif entity_id.endswith("_model_0"):
+                # Predictions don't need prediction mapping
+                mapped_to_pred += 1
+
+            # Check property mapping
+            has_props = False
+            if entity_id in property_by_pdb:
+                has_props = True
+            elif entity_id in property_by_pred:
+                has_props = True
+            elif entity_id in hideaki_to_short:
+                short = hideaki_to_short[entity_id]
+                if short in property_by_short:
+                    has_props = True
+            # For hideaki predictions, strip _model_0 and check
+            elif entity_id.endswith("_model_0"):
+                base = entity_id[:-8]  # Remove _model_0
+                if base in hideaki_to_short:
+                    short = hideaki_to_short[base]
+                    if short in property_by_short:
+                        has_props = True
+
+            if has_props:
+                mapped_to_props += 1
+
+        # Determine dataset label
+        if dataset_name == "mo_exp_A":
+            label = "Dataset 1a (exp Set A)"
+        elif dataset_name == "mo_exp_B":
+            label = "Dataset 1b (exp Set B + Hideaki)"
+        elif dataset_name == "mo_pred_exp":
+            label = "Dataset 2a (pred of exp)"
+        else:
+            label = "Dataset 2b (pred novel)"
+
+        print(f"\n{label}: {n_entities} entities - {mapped_to_pred}/{n_entities} mapped to predictions - {mapped_to_props}/{n_entities} mapped to properties")
+
+        # Report unmapped entities
+        if mapped_to_props < n_entities:
+            unmapped = []
+            for entity_id in entities:
+                has_props = False
+                if entity_id in property_by_pdb:
+                    has_props = True
+                elif entity_id in property_by_pred:
+                    has_props = True
+                elif entity_id in hideaki_to_short:
+                    short = hideaki_to_short[entity_id]
+                    if short in property_by_short:
+                        has_props = True
+                elif entity_id.endswith("_model_0"):
+                    base = entity_id[:-8]
+                    if base in hideaki_to_short:
+                        short = hideaki_to_short[base]
+                        if short in property_by_short:
+                            has_props = True
+                if not has_props:
+                    unmapped.append(entity_id)
+            if unmapped:
+                print(f"  [WARN] Unmapped to properties: {unmapped[:10]}{'...' if len(unmapped) > 10 else ''}")
+
+        dataset_details[dataset_name] = {
+            "entities": n_entities,
+            "mapped_to_pred": mapped_to_pred,
+            "mapped_to_props": mapped_to_props,
         }
+
+    # Final summary
+    print("\n" + "=" * 60)
+    print("SUMMARY")
+    print("=" * 60)
+    print(f"Property file: {PROPERTY_FILE.name}")
+    print(f"Total structures available: {len(available_structures)}")
+    print(f"Property entries: {len(property_df)}")
+    print(f"Structure mapping pairs: {len(structure_mapping)}")
+    print("=" * 60 + "\n")
+
+    return {
+        "processor": processor,
+        "property_df": property_df,
+        "available_structures": available_structures,
+        "dataset_counts": dataset_counts,
+        "structure_mapping": structure_mapping,
+        "dataset_details": dataset_details,
     }
 
-    # Process each dataset
-    for name, info in datasets.items():
-        print(f"\n=== Processing {name} dataset ===")
 
-        # Clear processor data for new dataset
-        cp.reset_data()
-
-        # Handle based on source type
-        if info['source_type'] == 'download':
-            process_downloadable_dataset(cp, name, info)
-        else:
-            process_local_dataset(cp, name, info, user_data_root)
-
-    # Final validation
-    validate_datasets(cp, datasets.keys(), user_data_root)
-
-    print("\nAll datasets have been successfully prepared!")
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Prepare MOGRN data and register datasets")
+    parser.add_argument("--rebuild", action="store_true", help="Force rebuild of existing datasets")
+    parser.add_argument("--download", action="store_true", help="Download missing experimental structures from RCSB")
+    args = parser.parse_args()
+
+    main(rebuild=args.rebuild, download=args.download)

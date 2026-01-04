@@ -331,7 +331,7 @@ def align_to_reference_and_annotate_helices(data_dict, output_dir='outputs', vis
     import numpy as np
     import pandas as pd
     from pathlib import Path
-    from protos.processing.structure.struct_alignment import get_structure_alignment
+    from protos.analysis.structure.alignment import get_structure_alignment
 
     processed_structures = data_dict['processed_structures']
 
