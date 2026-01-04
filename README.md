@@ -51,9 +51,42 @@ pip install -e .
 cd ..
 ```
 
-## Required Data Folders (Not Included)
+## Data Download
 
-**IMPORTANT**: Create and populate these folders before running the analysis:
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.18147121.svg)](https://doi.org/10.5281/zenodo.18147121)
+
+The analysis data is hosted on Zenodo as a single archive (~650 MB compressed, ~2 GB uncompressed). Download and extract using:
+
+```bash
+# Download and extract all data
+python download_data.py 18147121
+
+# List available files without downloading
+python download_data.py 18147121 --list
+
+# Force overwrite existing data folders
+python download_data.py 18147121 --overwrite
+
+# Keep the archive after extraction
+python download_data.py 18147121 --keep-archive
+```
+
+### Data Folders Downloaded from Zenodo
+
+| Folder | Size | Description |
+|--------|------|-------------|
+| `opsin_output/` | ~1.4 GB | Main analysis output (figures, cache, GRN analysis) |
+| `outputs/` | ~380 MB | Boltz prediction results |
+| `new_opsins_outputs/` | ~140 MB | Boltz results for new opsins |
+| `flat_outputs/` | ~66 MB | Flattened output files |
+| `structures/` | ~32 MB | Structure files (hideaki_exp/pred, mo_pred) |
+| `flat_new_opsins_outputs/` | ~6 MB | Flattened new opsin outputs |
+| `property/` | ~1.5 MB | Property data files |
+| `yaml_configs/` | ~500 KB | YAML configuration files |
+
+**Note**: The `data/` folder (protos working directory) is regenerated locally when you run the analysis and is not included in the Zenodo archive.
+
+### Required Data Contents
 
 1. **`property/`** - Property data files:
    - `mo_exp.csv`: Experimental opsin properties (required)
