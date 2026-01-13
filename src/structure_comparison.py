@@ -745,8 +745,9 @@ def calculate_binding_pocket_rmsd_for_pairs(mapping_dict, exp_processor, pred_pr
             print(f"[ERROR] Failed during alignment step for {exp_id} and {pred_id}: {str(e)}")
             traceback.print_exc()
             results[exp_id] = {'error': f'Processing failed (alignment): {str(e)}'}
+            continue
 
-            # STEP 5: Calculate binding pocket RMSD using mapped pairs and transformed pred_df_for_pocket_alignment
+        # STEP 5: Calculate binding pocket RMSD using mapped pairs and transformed pred_df_for_pocket_alignment
             pocket_rmsd_sum_sq = 0  # Changed from pocket_rmsd_sum to reflect squared sum
             pocket_atom_count = 0
             per_residue_rmsd = {}

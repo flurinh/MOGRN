@@ -65,7 +65,7 @@ def _sort_grn_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     return df.loc[:, ordered_cols]
 
 
-def align_and_assign_grn(data_dict, output_dir='outputs', visualize=True, global_ref_override=None, helices_file='property/helices_curated.json'):
+def align_and_assign_grn(data_dict, output_dir='outputs', visualize=True, global_ref_override=None, helices_file='property/helices_grn.json'):
     """
     Step 6: Structure alignment and GRN assignment
 
@@ -292,7 +292,7 @@ def align_and_assign_grn(data_dict, output_dir='outputs', visualize=True, global
         }
 
 
-def run_tree_based_alignment(data_dict, output_dir='outputs', visualize=True, method='weighted', helices_file='property/helices_curated.json', global_ref_override=None):
+def run_tree_based_alignment(data_dict, output_dir='outputs', visualize=True, method='weighted', helices_file='property/helices_grn.json', global_ref_override=None):
     """
     Run the tree-based alignment approach to generate alternative GRN assignments.
 

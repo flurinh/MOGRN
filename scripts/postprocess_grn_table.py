@@ -52,30 +52,45 @@ def parse_grn_column(col: str) -> Tuple[Optional[int], Optional[int]]:
     Parse a GRN column name to extract helix number and position.
 
     Args:
-        col: Column name like "1.50", "2.41", etc.
+        col: Column name like "1.50", "2.41", "7.4" (which means 7.40), etc.
 
     Returns:
         Tuple of (helix_num, position) or (None, None) if not a helix column
     """
     match = re.match(r'^(\d)\.(\d+)$', str(col))
     if match:
-        return int(match.group(1)), int(match.group(2))
+        helix_num = int(match.group(1))
+        pos_str = match.group(2)
+        # Handle single-digit positions: "7.4" means position 40, not 4
+        # Single digit after decimal represents tens place (e.g., 7.4 = 7.40)
+        if len(pos_str) == 1:
+            position = int(pos_str) * 10
+        else:
+            position = int(pos_str)
+        return helix_num, position
     return None, None
 
 
-def get_structure_residue_map(struct_id: str, processor: StructureProcessor) -> Dict[int, str]:
+def get_structure_residue_map(struct_id: str, processor: StructureProcessor,
+                               id_case_map: Optional[Dict[str, str]] = None) -> Dict[int, str]:
     """
     Get mapping from auth_seq_id to amino acid for a structure.
 
     Args:
-        struct_id: Structure identifier
+        struct_id: Structure identifier (lowercase)
         processor: StructureProcessor instance
+        id_case_map: Optional mapping from lowercase ID to original casing
 
     Returns:
         Dict mapping auth_seq_id -> amino acid 1-letter code
     """
     try:
-        df = processor.load_entity(struct_id)
+        # Try original casing first (for predictions), then lowercase (for experimental)
+        df = None
+        if id_case_map and struct_id in id_case_map:
+            df = processor.load_entity(id_case_map[struct_id])
+        if df is None:
+            df = processor.load_entity(struct_id)
         if df is None:
             return {}
 
@@ -220,7 +235,8 @@ def find_helix_pivot(struct_id: str, helix_num: int,
 
 def extend_grn_table(msa_df: pd.DataFrame,
                      helices_ext: Dict[str, Dict[str, List[int]]],
-                     processor: StructureProcessor) -> pd.DataFrame:
+                     processor: StructureProcessor,
+                     id_case_map: Optional[Dict[str, str]] = None) -> pd.DataFrame:
     """
     Extend GRN table to include all helical residues.
 
@@ -228,6 +244,7 @@ def extend_grn_table(msa_df: pd.DataFrame,
         msa_df: Original MSA table
         helices_ext: Extended helix definitions
         processor: StructureProcessor for loading structures
+        id_case_map: Optional mapping from lowercase ID to original casing
 
     Returns:
         Extended MSA table with additional GRN columns
@@ -261,7 +278,7 @@ def extend_grn_table(msa_df: pd.DataFrame,
         struct_gaps_filled = False
 
         # Get residue info for this structure
-        res_map = get_structure_residue_map(struct_id, processor)
+        res_map = get_structure_residue_map(struct_id, processor, id_case_map)
         if not res_map:
             continue
 
@@ -293,6 +310,11 @@ def extend_grn_table(msa_df: pd.DataFrame,
 
                 # Calculate GRN position for this residue
                 grn_pos = 50 + (seq_id - actual_50_seq)
+
+                # Skip invalid GRN positions (must be 0-99)
+                if grn_pos < 0 or grn_pos > 99:
+                    continue
+
                 col_name = f"{helix_num}.{grn_pos}"
                 aa = res_map[seq_id]
                 value = f"{aa}{seq_id}"
@@ -605,9 +627,44 @@ def analyze_coverage(df: pd.DataFrame, helices_ext: Dict[str, Dict[str, List[int
 
 def main():
     """Main function."""
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Postprocess GRN table")
+    parser.add_argument(
+        "--input", "-i",
+        default="opsin_output/curated_grn.csv",
+        help="Input GRN table CSV (default: opsin_output/curated_grn.csv)"
+    )
+    parser.add_argument(
+        "--output", "-o",
+        default="opsin_output/curated_grn_postprocessed.csv",
+        help="Output postprocessed GRN table CSV (default: opsin_output/curated_grn_postprocessed.csv)"
+    )
+    parser.add_argument(
+        "--skip-extend", action="store_true",
+        help="Skip extending GRN table to include all helical residues"
+    )
+    parser.add_argument(
+        "--skip-anchor", action="store_true",
+        help="Skip anchoring Schiff base lysine at 7.50"
+    )
+    parser.add_argument(
+        "--skip-squash", action="store_true",
+        help="Skip squashing gaps"
+    )
+    parser.add_argument(
+        "--skip-flexible", action="store_true",
+        help="Skip expanding to flexible regions (loops and tails)"
+    )
+    args = parser.parse_args()
+
     print("=" * 60)
-    print("GRN TABLE POSTPROCESSING - EXTEND HELIX COVERAGE")
+    print("GRN TABLE POSTPROCESSING")
     print("=" * 60)
+
+    # Resolve paths
+    input_file = PROJECT_ROOT / args.input
+    output_file = PROJECT_ROOT / args.output
 
     # Load extended helix definitions
     helices_ext = load_helices_extended()
@@ -617,16 +674,20 @@ def main():
     processor = StructureProcessor("grn_postprocess")
 
     # Load existing GRN table
-    grn_dir = PROJECT_ROOT / "opsin_output" / "global_reference_grn"
-    msa_file = grn_dir / "msa_table_grn.csv"
-
-    if not msa_file.exists():
-        print(f"[ERROR] GRN table not found: {msa_file}")
+    if not input_file.exists():
+        print(f"[ERROR] GRN table not found: {input_file}")
         return
 
-    print(f"[INFO] Loading GRN table: {msa_file}")
-    msa_df = pd.read_csv(msa_file, index_col=0)
+    print(f"[INFO] Loading GRN table: {input_file}")
+    msa_df = pd.read_csv(input_file, index_col=0)
     print(f"[INFO] Original table: {len(msa_df)} structures x {len(msa_df.columns)} positions")
+
+    # Create case map before normalizing (for loading structures with correct casing)
+    id_case_map = {sid.lower(): sid for sid in msa_df.index}
+
+    # Normalize structure IDs to lowercase for matching with helices_extended.json
+    msa_df.index = msa_df.index.str.lower()
+    print(f"[INFO] Normalized structure IDs to lowercase")
 
     # Analyze current coverage
     print("\n[INFO] Analyzing current coverage...")
@@ -639,43 +700,60 @@ def main():
         pct = h_stats['assigned'] / h_stats['total'] * 100 if h_stats['total'] > 0 else 0
         print(f"  Helix {h_num}: {h_stats['assigned']}/{h_stats['total']} ({pct:.1f}%)")
 
+    # Start with input dataframe
+    current_df = msa_df
+
     # Extend GRN table
-    print("\n" + "=" * 40)
-    extended_df = extend_grn_table(msa_df, helices_ext, processor)
-    print("=" * 40)
+    if not args.skip_extend:
+        print("\n" + "=" * 40)
+        current_df = extend_grn_table(current_df, helices_ext, processor, id_case_map)
+        print("=" * 40)
 
-    # Analyze new coverage
-    print("\n[INFO] Analyzing extended coverage...")
-    stats_after = analyze_coverage(extended_df, helices_ext)
-    coverage_after = stats_after['assigned_residues'] / stats_after['total_helical_residues'] * 100 if stats_after['total_helical_residues'] > 0 else 0
-    print(f"[INFO] Extended coverage: {stats_after['assigned_residues']}/{stats_after['total_helical_residues']} ({coverage_after:.1f}%)")
+        # Analyze new coverage
+        print("\n[INFO] Analyzing extended coverage...")
+        stats_after = analyze_coverage(current_df, helices_ext)
+        coverage_after = stats_after['assigned_residues'] / stats_after['total_helical_residues'] * 100 if stats_after['total_helical_residues'] > 0 else 0
+        print(f"[INFO] Extended coverage: {stats_after['assigned_residues']}/{stats_after['total_helical_residues']} ({coverage_after:.1f}%)")
 
-    for h_num in range(1, 8):
-        h_stats = stats_after['by_helix'][h_num]
-        pct = h_stats['assigned'] / h_stats['total'] * 100 if h_stats['total'] > 0 else 0
-        print(f"  Helix {h_num}: {h_stats['assigned']}/{h_stats['total']} ({pct:.1f}%)")
+        for h_num in range(1, 8):
+            h_stats = stats_after['by_helix'][h_num]
+            pct = h_stats['assigned'] / h_stats['total'] * 100 if h_stats['total'] > 0 else 0
+            print(f"  Helix {h_num}: {h_stats['assigned']}/{h_stats['total']} ({pct:.1f}%)")
 
-    # Calculate improvement
-    improvement = coverage_after - coverage_before
-    print(f"\n[INFO] Coverage improvement: +{improvement:.1f}%")
+        # Calculate improvement
+        improvement = coverage_after - coverage_before
+        print(f"\n[INFO] Coverage improvement: +{improvement:.1f}%")
+    else:
+        print("\n[INFO] Skipping extend step")
 
     # Anchor Schiff base lysine at 7.50
-    print("\n" + "=" * 40)
-    anchored_df = anchor_schiff_base_lysine(extended_df)
-    print("=" * 40)
+    if not args.skip_anchor:
+        print("\n" + "=" * 40)
+        current_df = anchor_schiff_base_lysine(current_df)
+        print("=" * 40)
+    else:
+        print("\n[INFO] Skipping anchor step")
 
     # Squash gaps (fix register shifts far from .50 positions)
-    print("\n" + "=" * 40)
-    squashed_df = squash_gaps(anchored_df)
-    print("=" * 40)
+    if not args.skip_squash:
+        print("\n" + "=" * 40)
+        current_df = squash_gaps(current_df)
+        print("=" * 40)
+    else:
+        print("\n[INFO] Skipping squash step")
 
     # Detect missing residues
-    missing = detect_missing_residues(squashed_df, helices_ext)
+    missing = detect_missing_residues(current_df, helices_ext)
 
     # Expand to include flexible regions (loops and tails)
-    print("\n" + "=" * 40)
-    final_df = expand_to_flexible_regions(squashed_df, helices_ext, processor)
-    print("=" * 40)
+    if not args.skip_flexible:
+        print("\n" + "=" * 40)
+        current_df = expand_to_flexible_regions(current_df, helices_ext, processor)
+        print("=" * 40)
+    else:
+        print("\n[INFO] Skipping flexible regions step")
+
+    final_df = current_df
 
     # Validate GRN columns and values
     print("\n" + "=" * 40)
@@ -684,30 +762,21 @@ def main():
     validate_grn_values(final_df)
     print("=" * 40)
 
-    # Save extended and squashed table
-    output_file = grn_dir / "msa_table_grn_extended.csv"
+    # Save postprocessed table
+    output_file.parent.mkdir(parents=True, exist_ok=True)
     final_df.to_csv(output_file)
-    print(f"\n[INFO] Saved extended GRN table to: {output_file}")
+    print(f"\n[INFO] Saved postprocessed GRN table to: {output_file}")
 
-    # Also process distance table
-    dist_file = grn_dir / "distance_table_grn.csv"
-    if dist_file.exists():
-        print(f"\n[INFO] Processing distance table...")
-        dist_df = pd.read_csv(dist_file, index_col=0)
+    # Summary
+    print("\n" + "=" * 60)
+    print("POSTPROCESSING COMPLETE")
+    print("=" * 60)
+    print(f"  Input:  {input_file}")
+    print(f"  Output: {output_file}")
+    print(f"  Structures: {len(final_df)}")
+    print(f"  Columns: {len(final_df.columns)}")
 
-        # Add new columns to distance table (with NaN values)
-        new_cols = set(final_df.columns) - set(dist_df.columns)
-        for col in new_cols:
-            dist_df[col] = np.nan
-
-        # Sort columns
-        dist_df = sort_grn_columns(dist_df)
-
-        dist_output = grn_dir / "distance_table_grn_extended.csv"
-        dist_df.to_csv(dist_output)
-        print(f"[INFO] Saved extended distance table to: {dist_output}")
-
-    return squashed_df
+    return final_df
 
 
 def anchor_schiff_base_lysine(df: pd.DataFrame) -> pd.DataFrame:

@@ -345,7 +345,7 @@ def align_to_reference_and_annotate_helices(data_dict, output_dir='outputs', vis
     # Define paths for helix files
     property_dir = 'property'
     helix_ref_file = os.path.join(property_dir, 'helix_ref_CnChR2_J230_refine9.json')
-    helix_cache_file = os.path.join(property_dir, 'helices_curated.json')
+    helix_cache_file = os.path.join(property_dir, 'helices_grn.json')
 
     # Initialize variables
     global_helix_annotations = {}

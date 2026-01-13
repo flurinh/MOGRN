@@ -181,7 +181,8 @@ def extend_helix(start: int, end: int,
                  phi_psi: Dict[int, Tuple[float, float]],
                  all_seq_ids: List[int],
                  next_helix_start: Optional[int] = None,
-                 prev_helix_end: Optional[int] = None) -> Tuple[int, int]:
+                 prev_helix_end: Optional[int] = None,
+                 max_extension: int = 12) -> Tuple[int, int]:
     """
     Extend a helix boundary using phi/psi angles.
 
@@ -191,6 +192,7 @@ def extend_helix(start: int, end: int,
         all_seq_ids: All sequence IDs in order
         next_helix_start: Start of next helix (don't extend past this)
         prev_helix_end: End of previous helix (don't extend before this)
+        max_extension: Maximum number of residues to extend in each direction
 
     Returns:
         Extended (start, end) tuple
@@ -200,8 +202,9 @@ def extend_helix(start: int, end: int,
     new_start = start
     new_end = end
 
-    # Extend N-terminal
-    while True:
+    # Extend N-terminal (up to max_extension residues)
+    n_extended = 0
+    while n_extended < max_extension:
         next_pos = new_start - 1
         if next_pos not in seq_set:
             break
@@ -211,13 +214,15 @@ def extend_helix(start: int, end: int,
             phi, psi = phi_psi[next_pos]
             if is_helical(phi, psi, extended=True):
                 new_start = next_pos
+                n_extended += 1
             else:
                 break
         else:
             break
 
-    # Extend C-terminal
-    while True:
+    # Extend C-terminal (up to max_extension residues)
+    c_extended = 0
+    while c_extended < max_extension:
         next_pos = new_end + 1
         if next_pos not in seq_set:
             break
@@ -227,6 +232,7 @@ def extend_helix(start: int, end: int,
             phi, psi = phi_psi[next_pos]
             if is_helical(phi, psi, extended=True):
                 new_end = next_pos
+                c_extended += 1
             else:
                 break
         else:
@@ -340,17 +346,16 @@ def main():
     # Initialize processor
     processor = StructureProcessor("helix_extend")
 
-    # Get all structures from datasets
-    datasets = ["mo_exp_A", "mo_exp_B", "mo_pred_exp", "mo_pred_novel"]
-    all_structures = set()
-
-    for dataset in datasets:
-        if processor.dataset_manager.dataset_exists(dataset):
-            structures = processor.get_dataset_entities(dataset)
-            all_structures.update(structures)
-            print(f"[INFO] Found {len(structures)} structures in {dataset}")
-
-    print(f"\n[INFO] Total structures in datasets: {len(all_structures)}")
+    # Get structure IDs from curated_grn.csv - these are the structures we need
+    grn_file = PROJECT_ROOT / "opsin_output" / "curated_grn.csv"
+    print(f"\n[INFO] Loading structure IDs from: {grn_file}")
+    grn_df = pd.read_csv(grn_file, index_col=0)
+    # Keep original IDs and create lowercase mapping for helices_curated.json lookup
+    original_ids = list(grn_df.index)
+    # Map lowercase -> original for loading structures with correct casing
+    id_case_map = {sid.lower(): sid for sid in original_ids}
+    all_structures = set(id_case_map.keys())  # lowercase for matching
+    print(f"[INFO] Found {len(all_structures)} structures in curated_grn.csv")
     print(f"[INFO] Structures with curated helices: {len(curated_helices)}")
 
     # Process structures
@@ -359,25 +364,30 @@ def main():
     unchanged_count = 0
     missing_count = 0
 
-    for struct_id in sorted(all_structures):
-        if struct_id not in curated_helices:
-            print(f"  {struct_id}... MISSING from curated")
+    for struct_id_lower in sorted(all_structures):
+        if struct_id_lower not in curated_helices:
+            print(f"  {struct_id_lower}... MISSING from curated")
             missing_count += 1
             continue
 
-        print(f"  {struct_id}...", end=" ", flush=True)
+        # Use original casing for loading from protos, fall back to lowercase
+        struct_id_original = id_case_map[struct_id_lower]
+        print(f"  {struct_id_lower}...", end=" ", flush=True)
 
         try:
-            df = processor.load_entity(struct_id)
+            # Try original casing first (for predictions), then lowercase (for experimental)
+            df = processor.load_entity(struct_id_original)
+            if df is None:
+                df = processor.load_entity(struct_id_lower)
             if df is None:
                 print("LOAD FAILED")
-                results[struct_id] = curated_helices[struct_id]
+                results[struct_id_lower] = curated_helices[struct_id_lower]
                 continue
 
             df = df.reset_index()
 
             # For predicted structures, set all chains to A
-            if '_model_0' in struct_id:
+            if '_model_0' in struct_id_lower:
                 df['auth_chain_id'] = 'A'
 
             if 'auth_chain_id' in df.columns:
@@ -388,9 +398,9 @@ def main():
                 df['res_atom_name'] = df['atom_name']
 
             # Process
-            curated = curated_helices[struct_id]
-            extended = process_structure(struct_id, df, curated)
-            results[struct_id] = extended
+            curated = curated_helices[struct_id_lower]
+            extended = process_structure(struct_id_lower, df, curated)
+            results[struct_id_lower] = extended
 
             # Compare
             changes = []
@@ -412,7 +422,7 @@ def main():
 
         except Exception as e:
             print(f"ERROR: {e}")
-            results[struct_id] = curated_helices[struct_id]
+            results[struct_id_lower] = curated_helices[struct_id_lower]
 
     print(f"\n[INFO] Extended: {extended_count}, Unchanged: {unchanged_count}, Missing: {missing_count}")
 

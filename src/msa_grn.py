@@ -15,9 +15,9 @@ import matplotlib.pyplot as plt
 from src.visualization_functions import visualize_msa_distances
 
 
-def load_helix_boundaries(structure_id, helices_file='property/helices_curated.json'):
+def load_helix_boundaries(structure_id, helices_file='property/helices_grn.json'):
     """
-    Load helix boundaries for a given structure from the helices_curated.json file.
+    Load helix boundaries for a given structure from the helices_grn.json file.
     
     Args:
         structure_id: ID of the structure to get helix boundaries for
@@ -963,7 +963,7 @@ def calculate_helix_distances(distance_table):
 
 def generate_grn_msa_tables(seq_alignment_dicts, processed_structures_complete, global_ref,
                          rmsd_df=None, max_rmsd_threshold=3.5, structure_mapping=None,
-                         helices_file='property/helices_curated.json'):
+                         helices_file='property/helices_grn.json'):
     """
     Creates all MSA tables with proper GRN (Generic Residue Numbering) column names.
     This function is a critical component for standardized analysis of membrane proteins:
@@ -981,7 +981,7 @@ def generate_grn_msa_tables(seq_alignment_dicts, processed_structures_complete, 
         rmsd_df: Optional DataFrame with RMSD values between structures
         max_rmsd_threshold: Maximum RMSD to global reference for inclusion (default: 3.5)
         structure_mapping: Optional mapping from experimental to predicted structures
-        helices_file: Path to JSON file containing helix boundaries (default: 'property/helices_curated.json')
+        helices_file: Path to JSON file containing helix boundaries (default: 'property/helices_grn.json')
 
     Returns:
         dict: Dictionary with tables using GRN column names
@@ -1135,7 +1135,7 @@ def generate_grn_msa_tables(seq_alignment_dicts, processed_structures_complete, 
     ref_struct = filtered_structures[global_ref]
     ref_df = ref_struct['df_ca_norm']
 
-    # Load helix boundaries from helices_curated.json
+    # Load helix boundaries from helices_grn.json
     tm_ranges = load_helix_boundaries(global_ref, helices_file)
     
     if tm_ranges is None:

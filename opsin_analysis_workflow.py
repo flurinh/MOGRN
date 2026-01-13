@@ -381,7 +381,7 @@ def run_opsin_analysis_workflow(
     retinal_name: str = "RET",
     retinal_cutoff: float = 6.0,
     global_ref_override: str = None,
-    helices_file: str = "property/helices_curated.json",
+    helices_file: str = "property/helices_grn.json",
     skip_prepare: bool = False,
     datasets: list = None,
 ) -> Dict[str, Any]:
@@ -685,7 +685,7 @@ if __name__ == "__main__":
         help="Override for global reference structure"
     )
     parser.add_argument(
-        "--helices-file", type=str, default="property/helices_curated.json",
+        "--helices-file", type=str, default="property/helices_grn.json",
         help="Path to helix boundaries JSON"
     )
     parser.add_argument(

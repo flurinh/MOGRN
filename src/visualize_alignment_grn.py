@@ -988,6 +988,17 @@ def create_interactive_opsin_visualization(
         if structure_count > max_structures:
             break
 
+        # Helper to format residue label (e.g., "F74")
+        def format_res_label(res1l, seq_id):
+            res = str(res1l).strip() if pd.notna(res1l) else 'X'
+            seq = ''
+            if pd.notna(seq_id):
+                try:
+                    seq = str(int(seq_id))
+                except (ValueError, TypeError):
+                    seq = str(seq_id).strip()
+            return f"{res}{seq}"
+
         if df is not None:
             for helix_num, group in df_aligned.groupby('helix_num'):
                 if len(group) == 0:
@@ -995,6 +1006,13 @@ def create_interactive_opsin_visualization(
 
                 helix_coords = group[['x', 'y', 'z']].values
                 helix_grn = group['grn'].values
+                # Get residue info for hover text
+                helix_res1l = group['res_name1l'].values if 'res_name1l' in group.columns else ['X'] * len(group)
+                helix_seq_id = group['auth_seq_id'].values if 'auth_seq_id' in group.columns else [None] * len(group)
+                hover_text = [
+                    f"{str(grn) if pd.notna(grn) else 'No GRN'}<br>Residue: {format_res_label(r, s)}"
+                    for grn, r, s in zip(helix_grn, helix_res1l, helix_seq_id)
+                ]
 
                 if helix_num == 0:
                     trace_name = "Loops/Non-helix"
@@ -1023,10 +1041,14 @@ def create_interactive_opsin_visualization(
                                  'X: %{x:.2f}<br>' +
                                  'Y: %{y:.2f}<br>' +
                                  'Z: %{z:.2f}<extra></extra>',
-                    text=[str(grn) if pd.notna(grn) else 'No GRN' for grn in helix_grn],
+                    text=hover_text,
                     visible=True
                 ), row=1, col=1)
         else:
+            # Get residue info from data dict
+            res_name1l = data.get('res_name1l', ['X'] * len(coords))
+            residue_ids = data.get('residues', [None] * len(coords))
+
             for helix_num in np.unique(helix_numbers):
                 helix_mask = helix_numbers == helix_num
                 if not np.any(helix_mask):
@@ -1034,6 +1056,12 @@ def create_interactive_opsin_visualization(
 
                 helix_coords = coords[helix_mask]
                 helix_grn = grn_positions[helix_mask]
+                helix_res1l = np.array(res_name1l)[helix_mask] if res_name1l is not None else ['X'] * np.sum(helix_mask)
+                helix_seq_id = np.array(residue_ids)[helix_mask] if residue_ids is not None else [None] * np.sum(helix_mask)
+                hover_text = [
+                    f"{str(grn) if pd.notna(grn) else 'No GRN'}<br>Residue: {format_res_label(r, s)}"
+                    for grn, r, s in zip(helix_grn, helix_res1l, helix_seq_id)
+                ]
 
                 if helix_num == 0:
                     trace_name = "Loops/Non-helix"
@@ -1062,7 +1090,7 @@ def create_interactive_opsin_visualization(
                                  'X: %{x:.2f}<br>' +
                                  'Y: %{y:.2f}<br>' +
                                  'Z: %{z:.2f}<extra></extra>',
-                    text=[str(grn) if pd.notna(grn) else 'No GRN' for grn in helix_grn],
+                    text=hover_text,
                     visible=True
                 ), row=1, col=1)
 
@@ -1086,6 +1114,17 @@ def create_interactive_opsin_visualization(
             if struct_id in property_data:
                 mol_func = property_data[struct_id].get('molecular_function', 'Unknown')
 
+            # Helper to format residue label (e.g., "F74")
+            def format_res_label(res1l, seq_id):
+                res = str(res1l).strip() if pd.notna(res1l) else 'X'
+                seq = ''
+                if pd.notna(seq_id):
+                    try:
+                        seq = str(int(seq_id))
+                    except (ValueError, TypeError):
+                        seq = str(seq_id).strip()
+                return f"{res}{seq}"
+
             df = data.get('dataframe')
             if df is not None:
                 df_aligned = df.copy()
@@ -1099,6 +1138,13 @@ def create_interactive_opsin_visualization(
 
                     helix_coords = group[['x', 'y', 'z']].values
                     helix_grn = group['grn'].values
+                    # Get residue info for hover text
+                    helix_res1l = group['res_name1l'].values if 'res_name1l' in group.columns else ['X'] * len(group)
+                    helix_seq_id = group['auth_seq_id'].values if 'auth_seq_id' in group.columns else [None] * len(group)
+                    hover_text = [
+                        f"{str(grn) if pd.notna(grn) else 'No GRN'}<br>Residue: {format_res_label(r, s)}"
+                        for grn, r, s in zip(helix_grn, helix_res1l, helix_seq_id)
+                    ]
 
                     trace_name = mol_func
                     legend_group = f"Property_{mol_func}"
@@ -1125,7 +1171,7 @@ def create_interactive_opsin_visualization(
                                      'X: %{x:.2f}<br>' +
                                      'Y: %{y:.2f}<br>' +
                                      'Z: %{z:.2f}<extra></extra>',
-                        text=[str(grn) if pd.notna(grn) else 'No GRN' for grn in helix_grn],
+                        text=hover_text,
                         visible=False,
                         meta={'coloring_mode': 'property'}
                     ), row=1, col=1)
@@ -1148,6 +1194,18 @@ def create_interactive_opsin_visualization(
 
         coords = data['coords']
         df = data.get('dataframe')
+
+        # Helper to format residue label (e.g., "F74")
+        def format_res_label(res1l, seq_id):
+            res = str(res1l).strip() if pd.notna(res1l) else 'X'
+            seq = ''
+            if pd.notna(seq_id):
+                try:
+                    seq = str(int(seq_id))
+                except (ValueError, TypeError):
+                    seq = str(seq_id).strip()
+            return f"{res}{seq}"
+
         if df is not None:
             df_aligned = df.copy()
             df_aligned[['x', 'y', 'z']] = coords
@@ -1157,13 +1215,14 @@ def create_interactive_opsin_visualization(
                 grn_pos = row['grn']
                 helix_num = row['helix_num']
                 coord = [row['x'], row['y'], row['z']]
+                res_label = format_res_label(row.get('res_name1l'), row.get('auth_seq_id'))
 
                 highlight_data_helix.setdefault(grn_pos, {'coords': [], 'colors': [], 'hover_text': []})
                 color_val = get_structure_color(struct_id, helix_num, 'helix')
                 highlight_data_helix[grn_pos]['coords'].append(coord)
                 highlight_data_helix[grn_pos]['colors'].append(color_val)
                 highlight_data_helix[grn_pos]['hover_text'].append(
-                    f'<b>{struct_id}</b><br>Helix: {int(helix_num) if helix_num != 0 else "Loop"}<br>GRN: {grn_pos}'
+                    f'<b>{struct_id}</b><br>Helix: {int(helix_num) if helix_num != 0 else "Loop"}<br>GRN: {grn_pos}<br>Residue: {res_label}'
                 )
 
                 if property_data:
@@ -1173,20 +1232,26 @@ def create_interactive_opsin_visualization(
                     highlight_data_property[grn_pos]['coords'].append(coord)
                     highlight_data_property[grn_pos]['colors'].append(property_color)
                     highlight_data_property[grn_pos]['hover_text'].append(
-                        f'<b>{struct_id}</b><br>Function: {mol_func}<br>Helix: {int(helix_num) if helix_num != 0 else "Loop"}<br>GRN: {grn_pos}'
+                        f'<b>{struct_id}</b><br>Function: {mol_func}<br>Helix: {int(helix_num) if helix_num != 0 else "Loop"}<br>GRN: {grn_pos}<br>Residue: {res_label}'
                     )
         else:
             grn_positions = data['grn_positions']
             helix_numbers = data['helix_numbers']
+            res_name1l = data.get('res_name1l', ['X'] * len(coords))
+            residue_ids = data.get('residues', [None] * len(coords))
 
-            for coord, grn_pos, helix_num in zip(coords, grn_positions, helix_numbers):
+            for i, (coord, grn_pos, helix_num) in enumerate(zip(coords, grn_positions, helix_numbers)):
                 if pd.notna(grn_pos):
+                    res1 = res_name1l[i] if res_name1l is not None else 'X'
+                    seq_id = residue_ids[i] if residue_ids is not None else None
+                    res_label = format_res_label(res1, seq_id)
+
                     highlight_data_helix.setdefault(grn_pos, {'coords': [], 'colors': [], 'hover_text': []})
                     color_val = get_structure_color(struct_id, helix_num, 'helix')
                     highlight_data_helix[grn_pos]['coords'].append(coord)
                     highlight_data_helix[grn_pos]['colors'].append(color_val)
                     highlight_data_helix[grn_pos]['hover_text'].append(
-                        f'<b>{struct_id}</b><br>Helix: {int(helix_num) if helix_num != 0 else "Loop"}<br>GRN: {grn_pos}'
+                        f'<b>{struct_id}</b><br>Helix: {int(helix_num) if helix_num != 0 else "Loop"}<br>GRN: {grn_pos}<br>Residue: {res_label}'
                     )
 
                     if property_data:
@@ -1196,7 +1261,7 @@ def create_interactive_opsin_visualization(
                         highlight_data_property[grn_pos]['coords'].append(coord)
                         highlight_data_property[grn_pos]['colors'].append(property_color)
                         highlight_data_property[grn_pos]['hover_text'].append(
-                            f'<b>{struct_id}</b><br>Function: {mol_func}<br>Helix: {int(helix_num) if helix_num != 0 else "Loop"}<br>GRN: {grn_pos}'
+                            f'<b>{struct_id}</b><br>Function: {mol_func}<br>Helix: {int(helix_num) if helix_num != 0 else "Loop"}<br>GRN: {grn_pos}<br>Residue: {res_label}'
                         )
 
         structure_count += 1
@@ -1488,17 +1553,12 @@ def create_interactive_opsin_visualization_extended(
     """
 
     def format_residue_annotation(residue_short, residue_long, seq_id):
-        """Create a concise residue label for hover text."""
+        """Create a concise residue label for hover text (e.g., F74)."""
         short_name = str(residue_short).strip() if pd.notna(residue_short) else ''
         if not short_name:
             short_name = 'X'
 
-        long_name = str(residue_long).strip() if pd.notna(residue_long) else ''
-        long_name = long_name.upper()
-        use_long = long_name and long_name not in {'', 'UNK', short_name.upper()}
-        residue_label = f"{short_name} ({long_name})" if use_long else short_name
-
-        seq_label = '?'
+        seq_label = ''
         if pd.notna(seq_id):
             try:
                 seq_label = str(int(seq_id))
@@ -1507,7 +1567,7 @@ def create_interactive_opsin_visualization_extended(
                 if seq_str:
                     seq_label = seq_str
 
-        return f"{residue_label} @ {seq_label}"
+        return f"{short_name}{seq_label}"
 
     def select_retinal_structure(struct_map, preferred_id):
         """Return the structure ID that should supply retinal coordinates."""
@@ -2527,7 +2587,7 @@ def create_interactive_opsin_visualization_extended(
 def create_opsin_visualization_from_workflow(
     cache_dir="opsin_output/cache",
     property_file="property/mo_exp_ST1.csv",
-    grn_file="opsin_output/curated_grn_postprocessed.csv",
+    grn_file="opsin_output/curated_grn.csv",
     output_file="opsin_output/interactive_grn_alignment_3d.html",
     reference_id='6xl3',
     **viz_kwargs
@@ -2592,6 +2652,22 @@ def create_opsin_visualization_from_workflow(
     print(f"\n=== Applying Membrane Orientation ===")
     oriented_structures = apply_membrane_orientation(aligned_structures, reference_id)
 
+    # Center all structures on global center of all coordinates
+    print(f"\n=== Centering on Global Center ===")
+    all_coords = []
+    for struct_id, data in oriented_structures.items():
+        if 'coords' in data:
+            all_coords.extend(data['coords'])
+    if all_coords:
+        global_center = np.mean(np.array(all_coords), axis=0)
+        print(f"Global center: [{global_center[0]:.2f}, {global_center[1]:.2f}, {global_center[2]:.2f}]")
+        for struct_id, data in oriented_structures.items():
+            if 'coords' in data:
+                data['coords'] = data['coords'] - global_center
+            if 'retinal' in data and data['retinal'] is not None and data['retinal'].get('coords') is not None:
+                data['retinal']['coords'] = data['retinal']['coords'] - global_center
+        print(f"Centered {len(oriented_structures)} structures on global center")
+
     print(f"\n=== Creating Interactive Visualization ===")
     fig = create_interactive_opsin_visualization(oriented_structures, grn_df, property_data, **viz_kwargs)
 
@@ -2605,7 +2681,7 @@ def create_opsin_visualization_from_workflow(
 def create_opsin_visualization_from_workflow_b(
     cache_dir="opsin_output/cache",
     property_file="property/mo_exp_ST1.csv",
-    grn_file="opsin_output/curated_grn_postprocessed.csv",
+    grn_file="opsin_output/curated_grn.csv",
     output_file="opsin_output/interactive_grn_alignment_b.html",
     reference_id='6xl3',
     **viz_kwargs
@@ -2653,6 +2729,22 @@ def create_opsin_visualization_from_workflow_b(
 
     print("\n=== Applying Membrane Orientation ===")
     oriented_structures = apply_membrane_orientation(aligned_structures, reference_id)
+
+    # Center all structures on global center of all coordinates
+    print("\n=== Centering on Global Center ===")
+    all_coords = []
+    for struct_id, data in oriented_structures.items():
+        if 'coords' in data:
+            all_coords.extend(data['coords'])
+    if all_coords:
+        global_center = np.mean(np.array(all_coords), axis=0)
+        print(f"Global center: [{global_center[0]:.2f}, {global_center[1]:.2f}, {global_center[2]:.2f}]")
+        for struct_id, data in oriented_structures.items():
+            if 'coords' in data:
+                data['coords'] = data['coords'] - global_center
+            if 'retinal' in data and data['retinal'] is not None and data['retinal'].get('coords') is not None:
+                data['retinal']['coords'] = data['retinal']['coords'] - global_center
+        print(f"Centered {len(oriented_structures)} structures on global center")
 
     print("\n=== Creating Enhanced Interactive Visualization ===")
     fig = create_interactive_opsin_visualization_extended(
