@@ -663,7 +663,7 @@ def main(args=None):
         if residue_table is None or (isinstance(residue_table, pd.DataFrame) and residue_table.empty):
             residue_table = data.get("residue_table")
         if residue_table is None or (isinstance(residue_table, pd.DataFrame) and residue_table.empty):
-            curated_grn_path = input_dir / "curated_grn.csv"
+            curated_grn_path = input_dir / "curated_grn_postprocessed.csv"
             if curated_grn_path.exists():
                 residue_table = pd.read_csv(curated_grn_path, index_col=0)
 
@@ -741,7 +741,7 @@ def main(args=None):
         if residue_table is None or (isinstance(residue_table, pd.DataFrame) and residue_table.empty):
             residue_table = data.get("residue_table")
         if residue_table is None or (isinstance(residue_table, pd.DataFrame) and residue_table.empty):
-            curated_grn_path = input_dir / "curated_grn.csv"
+            curated_grn_path = input_dir / "curated_grn_postprocessed.csv"
             if curated_grn_path.exists():
                 residue_table = pd.read_csv(curated_grn_path, index_col=0)
 

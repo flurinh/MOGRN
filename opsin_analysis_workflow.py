@@ -681,8 +681,8 @@ if __name__ == "__main__":
         help="Chain ID to analyze (default: A)"
     )
     parser.add_argument(
-        "--global-ref", type=str, default=None,
-        help="Override for global reference structure"
+        "--global-ref", type=str, default="7bmh",
+        help="Global reference structure (default: 7bmh)"
     )
     parser.add_argument(
         "--helices-file", type=str, default="property/helices_grn.json",
