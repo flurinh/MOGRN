@@ -82,7 +82,7 @@ def load_processed_structures(cache_dir="opsin_output/cache"):
     raise FileNotFoundError(f"No suitable processed structures cache found in {cache_path}")
 
 
-def load_grn_table(grn_file="opsin_output/curated_grn.csv"):
+def load_grn_table(grn_file="opsin_output/curated_grn_postprocessed.csv"):
     """Load and parse the GRN table"""
     grn_path = Path(grn_file)
 
@@ -128,159 +128,182 @@ def extract_ca_coordinates_with_grn(processed_structures, grn_df, chain_id='A', 
     all_structures = {}
     grn_structures = list(grn_df.index)
 
+    # Create case-insensitive lookup for processed structures
+    proc_lower_map = {k.lower(): k for k in processed_structures.keys()}
+
     for struct_id in grn_structures:
+        # Try direct match first, then case-insensitive
         if struct_id in processed_structures:
-            struct_data = processed_structures[struct_id]
-
-            # Use the same dataframe as RMSD calculation: 'df'
-            if 'df' not in struct_data:
-                print(f"Warning: No 'df' found for {struct_id}")
-                continue
-
-            struct_df = struct_data['df'].copy()
-
-            # Apply the EXACT same filtering as in compute_all_vs_all_rmsd_improved()
-            struct_df = struct_df[struct_df['auth_chain_id'] == chain_id]
-            struct_df = struct_df[struct_df['group'] == 'ATOM']
-
-            # Filter for helix residues if requested
-            if use_helix_only and 'helix_num' in struct_df.columns:
-                struct_helices = struct_df[struct_df['helix_num'] > 0]
-                if len(struct_helices) > 0:
-                    struct_df = struct_helices
-                else:
-                    print(f"[INFO] No TM helix residues found for {struct_id}. Using all protein residues instead.")
-            elif use_helix_only:
-                print(f"[INFO] helix annotations missing for {struct_id}; inferring after GRN mapping.")
-
-            # Filter for CA atoms only
-            ca_data = struct_df[struct_df['res_atom_name'] == 'CA']
-
-            if not ca_data.empty:
-                # Create GRN mapping for this structure
-                grn_row = grn_df.loc[struct_id]
-                seq_to_grn = {}  # Maps auth_seq_id -> GRN position
-                grn_to_seq = {}  # Maps GRN position -> auth_seq_id
-
-                for grn_pos, cell_value in grn_row.items():
-                    amino_acid, seq_pos = parse_grn_residue(cell_value)
-                    if amino_acid is not None and seq_pos is not None:
-                        seq_to_grn[seq_pos] = grn_pos
-                        grn_to_seq[grn_pos] = seq_pos
-
-                # Add GRN column to CA data
-                ca_data_with_grn = ca_data.copy()
-                ca_data_with_grn['grn_position'] = ca_data_with_grn['auth_seq_id'].map(seq_to_grn)
-                ca_data_with_grn['grn'] = ca_data_with_grn['grn_position']  # Direct GRN access
-
-                # Enrich residue names for hover text
-                if 'res_name1l' not in ca_data_with_grn.columns:
-                    if 'res_name3l' in ca_data_with_grn.columns:
-                        ca_data_with_grn['res_name1l'] = (
-                            ca_data_with_grn['res_name3l']
-                            .astype(str)
-                            .str.upper()
-                            .map(THREE_TO_ONE_AA)
-                            .fillna('X')
-                        )
-                    else:
-                        ca_data_with_grn['res_name1l'] = 'X'
-                else:
-                    ca_data_with_grn['res_name1l'] = ca_data_with_grn['res_name1l'].fillna('X')
-
-                if 'res_name3l' not in ca_data_with_grn.columns:
-                    ca_data_with_grn['res_name3l'] = ca_data_with_grn['res_name1l'].map(
-                        {v: k for k, v in THREE_TO_ONE_AA.items() if len(v) == 1}
-                    ).fillna('UNK')
-
-                # Determine dataset type
-                dataset_type = 'predicted' if struct_id.endswith('_model_0') else 'experimental'
-
-                # Add helix information (check if helix_num column exists in the filtered data)
-                if 'helix_num' in ca_data.columns:
-                    ca_data_with_grn['helix_num'] = ca_data['helix_num'].fillna(0).astype(int)
-                else:
-                    # Derive helix index from GRN label when explicit assignment is unavailable
-                    def _infer_helix(grn_label: str) -> int:
-                        if pd.isna(grn_label):
-                            return 0
-                        label = str(grn_label).strip()
-                        if not label:
-                            return 0
-                        prefix = label.split('.')[0]
-                        if prefix.isdigit():
-                            try:
-                                helix_idx = int(prefix)
-                                return helix_idx if 1 <= helix_idx <= 7 else 0
-                            except ValueError:
-                                return 0
-                        return 0
-
-                    ca_data_with_grn['helix_num'] = ca_data_with_grn['grn_position'].apply(_infer_helix).astype(int)
-                    print(f"[INFO] Inferred helix numbers from GRN labels for {struct_id}")
-
-                if use_helix_only:
-                    helix_mask = ca_data_with_grn['helix_num'] > 0
-                    if helix_mask.any():
-                        ca_data_with_grn = ca_data_with_grn[helix_mask]
-                    else:
-                        print(f"[INFO] Helix inference yielded no TM residues for {struct_id}; retaining all residues.")
-
-                if ca_data_with_grn.empty:
-                    print(f"[WARN] No CA residues remain for {struct_id} after filtering; skipping structure.")
-                    continue
-
-                # Capture retinal atoms if available for downstream visualization
-                retinal_info = None
-                df_ret = struct_data.get('df_ret')
-                if isinstance(df_ret, pd.DataFrame) and not df_ret.empty:
-                    try:
-                        retinal_df = df_ret.copy()
-                        retinal_coords = retinal_df[['x', 'y', 'z']].astype(float).values
-                        retinal_info = {
-                            'coords': retinal_coords,
-                            'atom_names': retinal_df['atom_name'].astype(str).values,
-                            'res_name3l': retinal_df.get('res_name3l', pd.Series(['RET'] * len(retinal_df))).astype(str).values,
-                            'chain_ids': retinal_df.get('auth_chain_id', pd.Series([''] * len(retinal_df))).astype(str).values
-                        }
-                    except Exception as retina_exc:
-                        print(f"[WARN] Failed to capture retinal coordinates for {struct_id}: {retina_exc}")
-                        retinal_info = None
-
-                all_structures[struct_id] = {
-                    'coords': ca_data_with_grn[['x', 'y', 'z']].astype(float).values,
-                    'residues': ca_data_with_grn['auth_seq_id'].values,
-                    'grn_positions': ca_data_with_grn['grn_position'].values,
-                    'grn': ca_data_with_grn['grn'].values,  # Direct GRN access
-                    'helix_numbers': ca_data_with_grn['helix_num'].values,
-                    'res_name1l': ca_data_with_grn['res_name1l'].values,
-                    'res_name3l': ca_data_with_grn['res_name3l'].values,
-                    'dataset': dataset_type,
-                    'structure_type': struct_data.get('structure_type', dataset_type),
-                    'seq_to_grn': seq_to_grn,
-                    'grn_to_seq': grn_to_seq,
-                    'dataframe': ca_data_with_grn,  # Store the full dataframe for efficient access
-                    'retinal': retinal_info
-                }
-            else:
-                print(f"Warning: No CA atoms found for {struct_id} after filtering")
+            proc_id = struct_id
+        elif struct_id.lower() in proc_lower_map:
+            proc_id = proc_lower_map[struct_id.lower()]
         else:
             print(f"Warning: {struct_id} has GRN assignment but not found in processed structures")
+            continue
+
+        struct_data = processed_structures[proc_id]
+
+        # Use the same dataframe as RMSD calculation: 'df'
+        if 'df' not in struct_data:
+            print(f"Warning: No 'df' found for {struct_id}")
+            continue
+
+        struct_df = struct_data['df'].copy()
+
+        # Apply the EXACT same filtering as in compute_all_vs_all_rmsd_improved()
+        struct_df = struct_df[struct_df['auth_chain_id'] == chain_id]
+        struct_df = struct_df[struct_df['group'] == 'ATOM']
+
+        # Filter for helix residues if requested
+        if use_helix_only and 'helix_num' in struct_df.columns:
+            struct_helices = struct_df[struct_df['helix_num'] > 0]
+            if len(struct_helices) > 0:
+                struct_df = struct_helices
+            else:
+                print(f"[INFO] No TM helix residues found for {struct_id}. Using all protein residues instead.")
+        elif use_helix_only:
+            print(f"[INFO] helix annotations missing for {struct_id}; inferring after GRN mapping.")
+
+        # Filter for CA atoms only
+        ca_data = struct_df[struct_df['res_atom_name'] == 'CA']
+
+        if not ca_data.empty:
+            # Create GRN mapping for this structure
+            grn_row = grn_df.loc[struct_id]
+            seq_to_grn = {}  # Maps auth_seq_id -> GRN position
+            grn_to_seq = {}  # Maps GRN position -> auth_seq_id
+
+            for grn_pos, cell_value in grn_row.items():
+                amino_acid, seq_pos = parse_grn_residue(cell_value)
+                if amino_acid is not None and seq_pos is not None:
+                    seq_to_grn[seq_pos] = grn_pos
+                    grn_to_seq[grn_pos] = seq_pos
+
+            # Add GRN column to CA data
+            ca_data_with_grn = ca_data.copy()
+            ca_data_with_grn['grn_position'] = ca_data_with_grn['auth_seq_id'].map(seq_to_grn)
+            ca_data_with_grn['grn'] = ca_data_with_grn['grn_position']  # Direct GRN access
+
+            # Enrich residue names for hover text
+            if 'res_name1l' not in ca_data_with_grn.columns:
+                if 'res_name3l' in ca_data_with_grn.columns:
+                    ca_data_with_grn['res_name1l'] = (
+                        ca_data_with_grn['res_name3l']
+                        .astype(str)
+                        .str.upper()
+                        .map(THREE_TO_ONE_AA)
+                        .fillna('X')
+                    )
+                else:
+                    ca_data_with_grn['res_name1l'] = 'X'
+            else:
+                ca_data_with_grn['res_name1l'] = ca_data_with_grn['res_name1l'].fillna('X')
+
+            if 'res_name3l' not in ca_data_with_grn.columns:
+                ca_data_with_grn['res_name3l'] = ca_data_with_grn['res_name1l'].map(
+                    {v: k for k, v in THREE_TO_ONE_AA.items() if len(v) == 1}
+                ).fillna('UNK')
+
+            # Determine dataset type
+            dataset_type = 'predicted' if struct_id.endswith('_model_0') else 'experimental'
+
+            # Add helix information (check if helix_num column exists in the filtered data)
+            if 'helix_num' in ca_data.columns:
+                ca_data_with_grn['helix_num'] = ca_data['helix_num'].fillna(0).astype(int)
+            else:
+                # Derive helix index from GRN label when explicit assignment is unavailable
+                def _infer_helix(grn_label: str) -> int:
+                    if pd.isna(grn_label):
+                        return 0
+                    label = str(grn_label).strip()
+                    if not label:
+                        return 0
+                    prefix = label.split('.')[0]
+                    if prefix.isdigit():
+                        try:
+                            helix_idx = int(prefix)
+                            return helix_idx if 1 <= helix_idx <= 7 else 0
+                        except ValueError:
+                            return 0
+                    return 0
+
+                ca_data_with_grn['helix_num'] = ca_data_with_grn['grn_position'].apply(_infer_helix).astype(int)
+                print(f"[INFO] Inferred helix numbers from GRN labels for {struct_id}")
+
+            if use_helix_only:
+                helix_mask = ca_data_with_grn['helix_num'] > 0
+                if helix_mask.any():
+                    ca_data_with_grn = ca_data_with_grn[helix_mask]
+                else:
+                    print(f"[INFO] Helix inference yielded no TM residues for {struct_id}; retaining all residues.")
+
+            if ca_data_with_grn.empty:
+                print(f"[WARN] No CA residues remain for {struct_id} after filtering; skipping structure.")
+                continue
+
+            # Capture retinal atoms if available for downstream visualization
+            retinal_info = None
+            df_ret = struct_data.get('df_ret')
+            if isinstance(df_ret, pd.DataFrame) and not df_ret.empty:
+                try:
+                    retinal_df = df_ret.copy()
+                    retinal_coords = retinal_df[['x', 'y', 'z']].astype(float).values
+                    retinal_info = {
+                        'coords': retinal_coords,
+                        'atom_names': retinal_df['atom_name'].astype(str).values,
+                        'res_name3l': retinal_df.get('res_name3l', pd.Series(['RET'] * len(retinal_df))).astype(str).values,
+                        'chain_ids': retinal_df.get('auth_chain_id', pd.Series([''] * len(retinal_df))).astype(str).values
+                    }
+                except Exception as retina_exc:
+                    print(f"[WARN] Failed to capture retinal coordinates for {struct_id}: {retina_exc}")
+                    retinal_info = None
+
+            # Use proc_id (lowercase) as key to match alignment paths which use lowercase IDs
+            all_structures[proc_id] = {
+                'coords': ca_data_with_grn[['x', 'y', 'z']].astype(float).values,
+                'residues': ca_data_with_grn['auth_seq_id'].values,
+                'grn_positions': ca_data_with_grn['grn_position'].values,
+                'grn': ca_data_with_grn['grn'].values,  # Direct GRN access
+                'helix_numbers': ca_data_with_grn['helix_num'].values,
+                'res_name1l': ca_data_with_grn['res_name1l'].values,
+                'res_name3l': ca_data_with_grn['res_name3l'].values,
+                'dataset': dataset_type,
+                'structure_type': struct_data.get('structure_type', dataset_type),
+                'seq_to_grn': seq_to_grn,
+                'grn_to_seq': grn_to_seq,
+                'dataframe': ca_data_with_grn,  # Store the full dataframe for efficient access
+                'retinal': retinal_info,
+                'grn_table_id': struct_id  # Store original GRN table ID for reference
+            }
+        else:
+            print(f"Warning: No CA atoms found for {struct_id} after filtering")
 
     print(f"Extracted CA coordinates with GRN mapping for {len(all_structures)} structures")
     return all_structures
 
 
-def apply_alignment_transformations(structures, alignment_paths, reference_id='MerMAID1_model_0'):
+def apply_alignment_transformations(structures, alignment_paths, reference_id='6xl3'):
     """Apply rotation matrices to align all structures to the global reference"""
     print(f"Using {reference_id} as global reference structure")
 
+    # Also try lowercase reference_id
     if reference_id not in structures:
-        print(f"Warning: Reference {reference_id} not found in structures. Using first available.")
-        reference_id = list(structures.keys())[0]
-        print(f"Using {reference_id} as reference instead")
+        if reference_id.lower() in structures:
+            reference_id = reference_id.lower()
+        elif reference_id.upper() in structures:
+            reference_id = reference_id.upper()
+        else:
+            print(f"Warning: Reference {reference_id} not found in structures. Using first available.")
+            reference_id = list(structures.keys())[0]
+            print(f"Using {reference_id} as reference instead")
 
     aligned_structures = {}
+
+    # Create case-insensitive lookup for alignment paths
+    align_lower_map = {}
+    for key in alignment_paths.keys():
+        lower_key = (key[0].lower(), key[1].lower())
+        align_lower_map[lower_key] = key
 
     # Reference structure (no transformation needed)
     aligned_structures[reference_id] = structures[reference_id].copy()
@@ -299,40 +322,93 @@ def apply_alignment_transformations(structures, alignment_paths, reference_id='M
         if struct_id == reference_id:
             continue
 
-        # Look for alignment path between reference and this structure
-        alignment_key = (reference_id, struct_id)
-        reverse_key = (struct_id, reference_id)
+        # Look for alignment path: we need (struct_id, reference_id) which aligns struct -> reference
+        # alignment_paths[(A, B)] gives R, t such that A_coords @ R.T + t aligns A to B
+        correct_key = (struct_id, reference_id)
+        wrong_key = (reference_id, struct_id)
+        correct_key_lower = (struct_id.lower(), reference_id.lower())
+        wrong_key_lower = (reference_id.lower(), struct_id.lower())
 
         R = None
         t = None
 
-        if alignment_key in alignment_paths:
-            alignment_info = alignment_paths[alignment_key]
+        if correct_key in alignment_paths:
+            # This is (struct_id, reference_id) - aligns struct -> reference (CORRECT)
+            alignment_info = alignment_paths[correct_key]
             R = np.array(alignment_info['rotation'])
             t = np.array(alignment_info['translation'])
-            print(f"Found direct alignment: {reference_id} -> {struct_id}")
+            print(f"Found alignment: {struct_id} -> {reference_id}")
 
-        elif reverse_key in alignment_paths:
-            alignment_info = alignment_paths[reverse_key]
-            R = np.array(alignment_info['rotation'])  # Already inverted
-            t = np.array(alignment_info['translation'])  # Already inverted
-            print(f"Found reverse alignment: {struct_id} -> {reference_id} (pre-computed inverse)")
+        elif correct_key_lower in align_lower_map:
+            orig_key = align_lower_map[correct_key_lower]
+            alignment_info = alignment_paths[orig_key]
+            R = np.array(alignment_info['rotation'])
+            t = np.array(alignment_info['translation'])
+            print(f"Found alignment (case-insensitive): {struct_id} -> {reference_id}")
+
+        elif wrong_key in alignment_paths:
+            # This is (reference_id, struct_id) - aligns reference -> struct
+            # We need the inverse: stored as (struct_id, reference_id) which should exist
+            # But if we're here, it means only (ref, struct) exists, so we use it inverted
+            alignment_info = alignment_paths[wrong_key]
+            R_orig = np.array(alignment_info['rotation'])
+            t_orig = np.array(alignment_info['translation'])
+            # Invert: R_inv = R.T, t_inv = -R.T @ t
+            R = R_orig.T
+            t = -R_orig.T @ t_orig
+            print(f"Found inverse alignment: {reference_id} -> {struct_id} (inverted)")
+
+        elif wrong_key_lower in align_lower_map:
+            orig_key = align_lower_map[wrong_key_lower]
+            alignment_info = alignment_paths[orig_key]
+            R_orig = np.array(alignment_info['rotation'])
+            t_orig = np.array(alignment_info['translation'])
+            R = R_orig.T
+            t = -R_orig.T @ t_orig
+            print(f"Found inverse alignment (case-insensitive): {reference_id} -> {struct_id} (inverted)")
 
         else:
-            print(f"No direct alignment path found for {struct_id}")
-            aligned_structures[struct_id] = structures[struct_id].copy()
-            aligned_structures[struct_id]['is_reference'] = False
+            print(f"No alignment path found for {struct_id} - EXCLUDING from visualization")
+            # Skip structures without alignment paths to avoid displaying them at wrong positions
             continue
 
         # Apply transformation to align structure to reference frame
-        if R is not None and t is not None:
-            # Method 3: Apply full transformation, then recenter to match the reference
-            coords_transformed = np.dot(structures[struct_id]['coords'], R) + t
+        # The correct formula is: (coords - struct_center) @ R.T + ref_center
+        # We need to compute centroids from matched residues
+        if R is not None and alignment_info is not None:
+            struct_coords = structures[struct_id]['coords']
+            struct_residues = structures[struct_id]['residues']
+            ref_coords = structures[reference_id]['coords']
+            ref_residues = structures[reference_id]['residues']
 
-            # Recenter the transformed coordinates to match the reference structure center
-            ref_center = np.mean(aligned_structures[reference_id]['coords'], axis=0)
-            transformed_center = np.mean(coords_transformed, axis=0)
-            coords_transformed = coords_transformed - transformed_center + ref_center
+            # Get residue mapping from alignment info
+            residue_mapping = alignment_info.get('residue_mapping', [])
+
+            # Build residue -> index maps
+            struct_res_to_idx = {int(res): i for i, res in enumerate(struct_residues)}
+            ref_res_to_idx = {int(res): i for i, res in enumerate(ref_residues)}
+
+            # Find matched indices
+            struct_matched_idx = []
+            ref_matched_idx = []
+            for mapping in residue_mapping:
+                s_res, r_res = mapping[0], mapping[1]
+                if s_res in struct_res_to_idx and r_res in ref_res_to_idx:
+                    struct_matched_idx.append(struct_res_to_idx[s_res])
+                    ref_matched_idx.append(ref_res_to_idx[r_res])
+
+            if len(struct_matched_idx) > 0:
+                # Compute centroids from matched residues
+                struct_center = np.mean(struct_coords[struct_matched_idx], axis=0)
+                ref_center = np.mean(ref_coords[ref_matched_idx], axis=0)
+
+                # Apply correct transformation: (coords - struct_center) @ R.T + ref_center
+                coords_transformed = (struct_coords - struct_center) @ R.T + ref_center
+            else:
+                # Fallback: use overall centroids
+                struct_center = np.mean(struct_coords, axis=0)
+                ref_center = np.mean(ref_coords, axis=0)
+                coords_transformed = (struct_coords - struct_center) @ R.T + ref_center
 
             # Copy structure data and update coordinates
             aligned_structures[struct_id] = structures[struct_id].copy()
@@ -342,8 +418,7 @@ def apply_alignment_transformations(structures, alignment_paths, reference_id='M
             # Apply same transformation to retinal coordinates if available
             if structures[struct_id].get('retinal'):
                 retinal_data = structures[struct_id]['retinal']
-                retinal_coords = np.dot(retinal_data['coords'], R) + t
-                retinal_coords = retinal_coords - transformed_center + ref_center
+                retinal_coords = (retinal_data['coords'] - struct_center) @ R.T + ref_center
                 aligned_structures[struct_id]['retinal'] = {
                     'coords': retinal_coords,
                     'atom_names': retinal_data['atom_names'].copy(),
@@ -583,7 +658,7 @@ def calculate_membrane_orientation_fallback(reference_coords, reference_residues
     return rotation_matrix
 
 
-def apply_membrane_orientation(aligned_structures, reference_id='MerMAID1_model_0'):
+def apply_membrane_orientation(aligned_structures, reference_id='6xl3'):
     """
     Apply membrane orientation to all aligned structures based on reference structure PCA.
 
@@ -808,6 +883,29 @@ def create_interactive_opsin_visualization(
     show_membrane=True
 ):
     """Legacy interactive visualization used for interactive_grn_alignment.html."""
+
+    # Find overall center of all coordinates for rotation-friendly centering
+    all_coords = []
+    for struct_id, data in aligned_structures.items():
+        if 'coords' in data:
+            all_coords.extend(data['coords'])
+
+    if all_coords:
+        all_coords = np.array(all_coords)
+        overall_center = np.mean(all_coords, axis=0)
+        print(f"Centering visualization on overall center: {overall_center}")
+    else:
+        overall_center = np.array([0.0, 0.0, 0.0])
+
+    # Apply centering offset to all structures
+    for struct_id, data in aligned_structures.items():
+        if 'coords' in data:
+            data['coords'] = data['coords'] - overall_center
+        if 'retinal' in data and data['retinal'] is not None and data['retinal'].get('coords') is not None:
+            data['retinal']['coords'] = data['retinal']['coords'] - overall_center
+        if 'dataframe' in data and data['dataframe'] is not None:
+            df = data['dataframe']
+            df[['x', 'y', 'z']] = df[['x', 'y', 'z']].values - overall_center
 
     existing_grns = set()
     structure_count = 0
@@ -1219,36 +1317,52 @@ def create_interactive_opsin_visualization(
         ), row=1, col=1)
         membrane_trace_count = 1
 
-    total_base_traces = len(fig.data)
+    # Total number of traces in fig.data for visibility array sizing
+    total_traces = len(fig.data)
+
+    # Trace indices in fig.data:
+    # 0 to helix_base_trace_count-1: helix base traces
+    # helix_base_trace_count to base_trace_count-1: property base traces
+    # base_trace_count to base_trace_count+len(all_grn_positions)*2-1: highlight traces
+    # then table traces, then membrane
+
+    # Calculate where highlight traces start
+    highlight_start_idx = base_trace_count
 
     def create_visibility_array(grn_index, color_mode='helix'):
-        visibility = []
+        # Build visibility array matching exact order in fig.data
+        visibility = [False] * total_traces
 
+        # Set base traces visibility
         if color_mode == 'helix':
-            visibility.extend([True] * helix_base_trace_count)
-            if property_data:
-                visibility.extend([False] * (base_trace_count - helix_base_trace_count))
+            for i in range(helix_base_trace_count):
+                visibility[i] = True
         else:
-            visibility.extend([False] * helix_base_trace_count)
-            if property_data:
-                visibility.extend([True] * (base_trace_count - helix_base_trace_count))
+            for i in range(helix_base_trace_count, base_trace_count):
+                visibility[i] = True
 
-        visibility.extend([True] * membrane_trace_count)
+        # Set membrane trace visibility (last trace)
+        if membrane_trace_count > 0:
+            visibility[-1] = True
 
+        # Set highlight trace visibility
+        # Helix highlights are at indices: base_trace_count to base_trace_count + len(all_grn_positions) - 1
+        # Property highlights are at indices: base_trace_count + len(all_grn_positions) to base_trace_count + 2*len(all_grn_positions) - 1
         if color_mode == 'helix':
-            visibility.extend([False] * len(all_grn_positions))
-            visibility[total_base_traces + grn_index] = True
-            if property_data:
-                visibility.extend([False] * len(all_grn_positions))
+            helix_highlight_idx = highlight_start_idx + grn_index
+            if helix_highlight_idx < total_traces:
+                visibility[helix_highlight_idx] = True
         else:
-            visibility.extend([False] * len(all_grn_positions))
-            if property_data:
-                visibility.extend([False] * len(all_grn_positions))
-                visibility[total_base_traces + len(all_grn_positions) + grn_index] = True
+            property_highlight_idx = highlight_start_idx + len(all_grn_positions) + grn_index
+            if property_highlight_idx < total_traces:
+                visibility[property_highlight_idx] = True
 
-        table_start_idx = len(visibility)
-        visibility.extend([False] * len(all_grn_positions))
-        visibility[table_start_idx + grn_index] = True
+        # Set table trace visibility
+        # Table traces are at indices: base_trace_count + 2*len(all_grn_positions) to base_trace_count + 3*len(all_grn_positions) - 1
+        table_start_idx = highlight_start_idx + 2 * len(all_grn_positions)
+        table_idx = table_start_idx + grn_index
+        if table_idx < total_traces:
+            visibility[table_idx] = True
 
         return visibility
 
@@ -1328,7 +1442,8 @@ def create_interactive_opsin_visualization(
         yaxis=dict(visible=False, showbackground=False, showgrid=False, showline=False, showticklabels=False, title=""),
         zaxis=dict(visible=False, showbackground=False, showgrid=False, showline=False, showticklabels=False, title=""),
         camera=dict(eye=dict(x=1.8, y=1.8, z=0.8), center=dict(x=0, y=0, z=0), up=dict(x=0, y=0, z=1)),
-        aspectmode='cube',
+        aspectmode='data',
+        aspectratio=dict(x=1, y=1, z=1),
         bgcolor='white'
     )
 
@@ -1346,7 +1461,7 @@ def create_interactive_opsin_visualization_extended(
     membrane_opacity=0.05,
     show_membrane=True,
     include_retinal=False,
-    retinal_reference_id='MerMAID1_model_0',
+    retinal_reference_id='6xl3',
     hover_show_residue_name=False,
     enable_amino_acid_filter=False
 ):
@@ -1516,6 +1631,29 @@ def create_interactive_opsin_visualization_extended(
         )
 
         return traces
+
+    # Find overall center of all coordinates for rotation-friendly centering
+    all_coords = []
+    for struct_id, data in aligned_structures.items():
+        if 'coords' in data:
+            all_coords.extend(data['coords'])
+
+    if all_coords:
+        all_coords = np.array(all_coords)
+        overall_center = np.mean(all_coords, axis=0)
+        print(f"Centering visualization on overall center: {overall_center}")
+    else:
+        overall_center = np.array([0.0, 0.0, 0.0])
+
+    # Apply centering offset to all structures
+    for struct_id, data in aligned_structures.items():
+        if 'coords' in data:
+            data['coords'] = data['coords'] - overall_center
+        if 'retinal' in data and data['retinal'] is not None and data['retinal'].get('coords') is not None:
+            data['retinal']['coords'] = data['retinal']['coords'] - overall_center
+        if 'dataframe' in data and data['dataframe'] is not None:
+            df = data['dataframe']
+            df[['x', 'y', 'z']] = df[['x', 'y', 'z']].values - overall_center
 
     # First, collect all GRN positions that actually exist in the structures
     existing_grns = set()
@@ -2377,7 +2515,8 @@ def create_interactive_opsin_visualization_extended(
             center=dict(x=0, y=0, z=0),     # Look at center
             up=dict(x=0, y=0, z=1)          # Z-axis points up in the view
         ),
-        aspectmode='cube',
+        aspectmode='data',
+        aspectratio=dict(x=1, y=1, z=1),
         # Clean white background
         bgcolor='white'
     )
@@ -2387,10 +2526,10 @@ def create_interactive_opsin_visualization_extended(
 
 def create_opsin_visualization_from_workflow(
     cache_dir="opsin_output/cache",
-    property_file="property/mo_exp.csv",
-    grn_file="opsin_output/curated_grn.csv",
+    property_file="property/mo_exp_ST1.csv",
+    grn_file="opsin_output/curated_grn_postprocessed.csv",
     output_file="opsin_output/interactive_grn_alignment_3d.html",
-    reference_id='MerMAID1_model_0',
+    reference_id='6xl3',
     **viz_kwargs
 ):
     """
@@ -2465,10 +2604,10 @@ def create_opsin_visualization_from_workflow(
 
 def create_opsin_visualization_from_workflow_b(
     cache_dir="opsin_output/cache",
-    property_file="property/mo_exp.csv",
-    grn_file="opsin_output/curated_grn.csv",
+    property_file="property/mo_exp_ST1.csv",
+    grn_file="opsin_output/curated_grn_postprocessed.csv",
     output_file="opsin_output/interactive_grn_alignment_b.html",
-    reference_id='MerMAID1_model_0',
+    reference_id='6xl3',
     **viz_kwargs
 ):
     """Generate the enhanced interactive figure with retinal overlay and amino-acid filtering."""

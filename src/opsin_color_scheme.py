@@ -201,10 +201,20 @@ RMSD_SPECTRAL_COMPACT_CMAP = ListedColormap([
 RMSD_WHITE_TO_DARKGRAY_COLORS = [
     OPSIN_COLORS['gray_1_white'],      # For min RMSD value
     OPSIN_COLORS['gray_8_darkest']       # For max RMSD value
-]   
+]
 RMSD_WHITE_TO_DARKGRAY_CMAP = LinearSegmentedColormap.from_list(
     'opsin_rmsd_white_to_darkgray',
     RMSD_WHITE_TO_DARKGRAY_COLORS
+)
+
+# White to Lime colormap for predicted structures (matches STATUS_PREDICTED_COLOR)
+RMSD_WHITE_TO_LIME_COLORS = [
+    OPSIN_COLORS['white'],             # For min value
+    OPSIN_COLORS['utility_lime']       # For max value (matches predicted dot color)
+]
+RMSD_WHITE_TO_LIME_CMAP = LinearSegmentedColormap.from_list(
+    'opsin_rmsd_white_to_lime',
+    RMSD_WHITE_TO_LIME_COLORS
 )
 
 RMSD_BOUNDS = [0.0, 1.0, 2.5, 5.0]

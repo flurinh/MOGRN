@@ -915,7 +915,7 @@ def create_exp_mapping(cp_mo_exp, cp_hide_exp):
     return mapping
 
 
-def create_exp_mapping_with_display_name(cp_mo_exp, cp_hide_exp, mo_property_file='/mnt/c/Users/hidbe/PycharmProjects/phd/projects/opsin_analysis/property/mo_exp.csv'):
+def create_exp_mapping_with_display_name(cp_mo_exp, cp_hide_exp, mo_property_file='/mnt/c/Users/hidbe/PycharmProjects/phd/projects/opsin_analysis/property/mo_exp_ST1.csv'):
     """
     Creates a 1:1 mapping between structures in cp_mo_exp and cp_hide_exp 
     using 'PDB ID' from cp_hide_exp and 'display_name + _model_0' from cp_mo_exp.
@@ -923,7 +923,7 @@ def create_exp_mapping_with_display_name(cp_mo_exp, cp_hide_exp, mo_property_fil
     Args:
         cp_mo_exp: CifBaseProcessor containing MO experimental structures
         cp_hide_exp: CifBaseProcessor containing Hideaki experimental structures
-        mo_property_file: Path to the mo_exp.csv property file containing display_name data
+        mo_property_file: Path to the mo_exp_ST1.csv property file containing display_name data
         
     Returns:
         dict: Dictionary mapping 'PDB ID' from cp_hide_exp to corresponding 'display_name + _model_0' from cp_mo_exp

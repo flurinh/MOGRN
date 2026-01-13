@@ -179,7 +179,7 @@ def align_and_assign_grn(data_dict, output_dir='outputs', visualize=True, global
             processed_structures_complete,
             global_ref,
             rmsd_df=rmsd_df,  # Pass RMSD matrix for filtering
-            max_rmsd_threshold=3.0,  # Filter structures with RMSD > 3.0 to reference
+            max_rmsd_threshold=3.5,  # Filter structures with RMSD > 3.5 to reference
             structure_mapping=structure_mapping,  # Pass structure mapping to prioritize experimental structures
             helices_file=helices_file  # Pass helices file path
         )
@@ -248,7 +248,7 @@ def align_and_assign_grn(data_dict, output_dir='outputs', visualize=True, global
 
         # Now run the tree-based alignment method as an additional approach
         print("\n=== Running Tree-Based Alignment as Additional Method ===")
-        tree_based_results = run_tree_based_alignment(data_dict, output_dir, visualize, helices_file=helices_file)
+        tree_based_results = run_tree_based_alignment(data_dict, output_dir, visualize, helices_file=helices_file, global_ref_override=global_ref)
 
         # Combine results from both methods
         result_dict = {
@@ -292,13 +292,13 @@ def align_and_assign_grn(data_dict, output_dir='outputs', visualize=True, global
         }
 
 
-def run_tree_based_alignment(data_dict, output_dir='outputs', visualize=True, method='weighted', helices_file='property/helices_curated.json'):
+def run_tree_based_alignment(data_dict, output_dir='outputs', visualize=True, method='weighted', helices_file='property/helices_curated.json', global_ref_override=None):
     """
     Run the tree-based alignment approach to generate alternative GRN assignments.
-    
+
     This function uses hierarchical clustering to build a guide tree for progressive alignment,
     which can handle structures that don't align well to a single reference.
-    
+
     Args:
         data_dict: Dictionary with data from previous steps
         output_dir: Directory to save outputs files
@@ -306,7 +306,8 @@ def run_tree_based_alignment(data_dict, output_dir='outputs', visualize=True, me
         method: Linkage method for hierarchical clustering ('weighted', 'average', 'single', 'complete', etc.)
                Default is 'weighted' (WPGMA) which gives equal weight to each object
         helices_file: Path to JSON file containing helix boundaries
-        
+        global_ref_override: Optional override for reference structure (uses same global reference as main workflow)
+
     Returns:
         Dictionary with tree-based alignment results
     """
@@ -326,12 +327,13 @@ def run_tree_based_alignment(data_dict, output_dir='outputs', visualize=True, me
     try:
         # Create tree-based sequence alignment dictionaries
         seq_alignment_dicts, central_ref, enhanced_paths = create_tree_based_seq_alignment_dicts(
-            rmsd_df.loc[pdb_list, pdb_list], 
-            alignment_paths, 
-            method=method
+            rmsd_df.loc[pdb_list, pdb_list],
+            alignment_paths,
+            method=method,
+            global_ref_override=global_ref_override
         )
-        
-        print(f"Tree-based central reference structure: {central_ref}")
+
+        print(f"Tree-based reference structure: {central_ref}")
         print(f"Generated {len(enhanced_paths) - len(alignment_paths)} additional transitive alignments")
         
         # Get structure mapping from data_dict if available
@@ -343,7 +345,7 @@ def run_tree_based_alignment(data_dict, output_dir='outputs', visualize=True, me
             processed_structures,
             central_ref,
             rmsd_df=rmsd_df,
-            max_rmsd_threshold=3.0,
+            max_rmsd_threshold=3.5,
             structure_mapping=structure_mapping,
             helices_file=helices_file
         )
@@ -360,13 +362,112 @@ def run_tree_based_alignment(data_dict, output_dir='outputs', visualize=True, me
             print(f"\n[INFO] {excluded_count} structures were excluded from tree-based MSA due to high RMSD (>3.0Å)")
             print(f"[INFO] Final tree-based MSA includes {len(msa_df)} structures and {len(msa_df.columns)} positions")
         
-        # Save the tree-based tables
+        # Save the tree-based tables (before postprocessing)
         msa_df.to_csv(os.path.join(tree_output_dir, "msa_table_grn.csv"))
         distance_table.to_csv(os.path.join(tree_output_dir, "distance_table_grn.csv"))
         ca_msa_df.to_csv(os.path.join(tree_output_dir, "ca_msa_table_grn.csv"))
         ca_distance_table.to_csv(os.path.join(tree_output_dir, "ca_distance_table_grn.csv"))
-        
+
         print("Tree-based MSA and distance tables generated and saved.")
+
+        # Apply full postprocessing (extend + K anchor + gap squash + detect missing)
+        print("\n=== Applying Full Postprocessing to Tree-Based GRN Table ===")
+        try:
+            import sys
+            sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            from scripts.postprocess_grn_table import (
+                load_helices_extended,
+                extend_grn_table,
+                anchor_schiff_base_lysine,
+                squash_gaps,
+                detect_missing_residues,
+                analyze_coverage,
+                sort_grn_columns,
+                expand_to_flexible_regions,
+                validate_grn_columns,
+                validate_grn_values
+            )
+
+            # Load extended helix definitions
+            helices_ext = load_helices_extended()
+            print(f"[INFO] Loaded helix definitions for {len(helices_ext)} structures")
+
+            # Get processor from protos (should already be initialized)
+            try:
+                from protos.processing.structure import StructureProcessor
+                processor = StructureProcessor("tree_grn_postprocess")
+            except Exception as e:
+                print(f"[WARNING] Could not initialize StructureProcessor: {e}")
+                processor = None
+
+            # Analyze coverage before
+            print("\n[INFO] Analyzing current coverage...")
+            stats_before = analyze_coverage(msa_df, helices_ext)
+            coverage_before = stats_before['assigned_residues'] / stats_before['total_helical_residues'] * 100 if stats_before['total_helical_residues'] > 0 else 0
+            print(f"[INFO] Current coverage: {stats_before['assigned_residues']}/{stats_before['total_helical_residues']} ({coverage_before:.1f}%)")
+
+            # Step 1: Extend GRN table to include all helical residues
+            if processor:
+                print("\n[INFO] Extending GRN table to include all helical residues...")
+                msa_df_postprocessed = extend_grn_table(msa_df.copy(), helices_ext, processor)
+            else:
+                print("[WARNING] Skipping table extension (no processor available)")
+                msa_df_postprocessed = msa_df.copy()
+
+            # Step 2: Anchor Schiff base lysine at 7.50
+            print("\n[INFO] Anchoring Schiff base lysine at position 7.50...")
+            msa_df_postprocessed = anchor_schiff_base_lysine(msa_df_postprocessed)
+
+            # Step 3: Squash gaps
+            print("\n[INFO] Squashing gaps...")
+            msa_df_postprocessed = squash_gaps(msa_df_postprocessed)
+
+            # Step 4: Detect missing residues
+            print("\n[INFO] Detecting missing residues...")
+            missing = detect_missing_residues(msa_df_postprocessed, helices_ext)
+            if missing:
+                total_missing = sum(len(v) for v in missing.values())
+                print(f"[INFO] Found {total_missing} missing residue(s) in {len(missing)} structure(s)")
+                # Show first few
+                for struct_id, gaps in list(missing.items())[:5]:
+                    for helix, start, end in gaps:
+                        print(f"  {struct_id}: Helix {helix}, residues {start}-{end}")
+                if len(missing) > 5:
+                    print(f"  ... and {len(missing) - 5} more structures with missing residues")
+
+            # Step 5: Expand to flexible regions (loops and tails)
+            if processor:
+                print("\n[INFO] Expanding to flexible regions (loops and tails)...")
+                msa_df_postprocessed = expand_to_flexible_regions(msa_df_postprocessed, helices_ext, processor)
+            else:
+                print("[WARNING] Skipping flexible region expansion (no processor available)")
+
+            # Analyze coverage after
+            print("\n[INFO] Analyzing extended coverage...")
+            stats_after = analyze_coverage(msa_df_postprocessed, helices_ext)
+            coverage_after = stats_after['assigned_residues'] / stats_after['total_helical_residues'] * 100 if stats_after['total_helical_residues'] > 0 else 0
+            print(f"[INFO] Extended coverage: {stats_after['assigned_residues']}/{stats_after['total_helical_residues']} ({coverage_after:.1f}%)")
+            print(f"[INFO] Coverage improvement: +{coverage_after - coverage_before:.1f}%")
+
+            # Sort columns
+            msa_df_postprocessed = sort_grn_columns(msa_df_postprocessed)
+
+            # Validate GRN columns and values
+            print("\n[INFO] Validating GRN table...")
+            validate_grn_columns(msa_df_postprocessed)
+            validate_grn_values(msa_df_postprocessed)
+
+            # Save postprocessed table
+            msa_df_postprocessed.to_csv(os.path.join(tree_output_dir, "msa_table_grn_extended.csv"))
+            print(f"\n[INFO] Postprocessed tree-based GRN table saved to: {os.path.join(tree_output_dir, 'msa_table_grn_extended.csv')}")
+
+            # Use the postprocessed table
+            msa_df = msa_df_postprocessed
+
+        except Exception as e:
+            print(f"[WARNING] Could not apply postprocessing: {e}")
+            import traceback
+            traceback.print_exc()
         
         # Display statistics about the tables
         print("\nTree-Based MSA Statistics:")

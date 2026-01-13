@@ -226,79 +226,91 @@ def find_type_references(all_structures, type_key='type'):
         
         return type_references
 
+def _is_experimental_structure(struct_id):
+    """Check if a structure is experimental (not a prediction/model)."""
+    return "_model_0" not in struct_id and "_pred" not in struct_id
+
+
 def find_global_reference(all_structures, type_references):
     """
     Find a global reference structure from type references.
-    
+
+    IMPORTANT: Global reference MUST be an experimental structure (not a model).
+
     Args:
         all_structures: Dictionary of all structures or DataFrame with RMSD values
         type_references: Dictionary mapping types to reference structure IDs
-        
+
     Returns:
         str: ID of global reference structure
     """
+    # Filter to only experimental structures first
+    exp_type_refs = {t: s for t, s in type_references.items() if _is_experimental_structure(s)}
+
+    if not exp_type_refs:
+        print("[WARNING] No experimental structures in type references! Falling back to predicted.")
+        exp_type_refs = type_references
+    else:
+        print(f"[INFO] Selecting global reference from {len(exp_type_refs)} experimental type references")
+
     # If only one type reference, use it
-    if len(type_references) == 1:
-        return list(type_references.values())[0]
-    
+    if len(exp_type_refs) == 1:
+        return list(exp_type_refs.values())[0]
+
     # Detect if all_structures is a DataFrame (RMSD matrix) or dict of structures
     if isinstance(all_structures, pd.DataFrame):
         # When using RMSD DataFrame, choose reference with lowest average RMSD
         best_global_ref = None
         best_avg_rmsd = float('inf')
-        
-        for struct_type, struct_id in type_references.items():
+
+        for struct_type, struct_id in exp_type_refs.items():
             if struct_id in all_structures.index:
                 # Calculate average RMSD to all other structures
                 avg_rmsd = all_structures.loc[struct_id].mean()
-                
+
                 # Skip structures with suspiciously low error values (<0.1)
                 # which may indicate incorrectly processed structures
                 if avg_rmsd < 0.1:
                     print(f"[WARNING] Skipping {struct_id} as potential reference: suspiciously low RMSD ({avg_rmsd:.4f})")
                     continue
-                    
+
                 if avg_rmsd < best_avg_rmsd:
                     best_avg_rmsd = avg_rmsd
                     best_global_ref = struct_id
-        
-        # If no suitable structure found, use the first one
-        if best_global_ref is None and type_references:
-            best_global_ref = list(type_references.values())[0]
-            
+
+        # If no suitable structure found, use the first experimental one
+        if best_global_ref is None and exp_type_refs:
+            best_global_ref = list(exp_type_refs.values())[0]
+
         return best_global_ref
     else:
         # Original implementation for dictionary of structures
         best_global_ref = None
         best_resolution = float('inf')
-        
-        for struct_type, struct_id in type_references.items():
+
+        for struct_type, struct_id in exp_type_refs.items():
             if struct_id not in all_structures:
                 continue
-                
+
             struct_data = all_structures[struct_id]
-            
+
             # Check for suspiciously low RMSD values in metadata
             if 'metadata' in struct_data and 'avg_rmsd' in struct_data['metadata']:
                 avg_rmsd = struct_data['metadata']['avg_rmsd']
                 if avg_rmsd < 0.1:
                     print(f"[WARNING] Skipping {struct_id} as potential reference: suspiciously low RMSD ({avg_rmsd:.4f})")
                     continue
-                    
+
             if 'metadata' in struct_data and 'resolution' in struct_data['metadata']:
                 resolution = struct_data['metadata']['resolution']
                 if resolution < best_resolution:
                     best_resolution = resolution
                     best_global_ref = struct_id
 
-        # BEST_GLOBAL_REF
-        best_global_ref = 'CnChR2_J230_refine9'
-        print("Hard set CnChR2_J230_refine9 to global ref.")
+        # If no resolution data available, use first experimental structure
+        if best_global_ref is None and exp_type_refs:
+            best_global_ref = list(exp_type_refs.values())[0]
 
-        # If no resolution data available, just take the first one
-        if best_global_ref is None and type_references:
-            best_global_ref = list(type_references.values())[0]
-        
         return best_global_ref
 
 def apply_alignment(coords, alignment):

@@ -61,7 +61,27 @@ from src.structure_comparison import (
 )
 from src.helix_analysis import align_to_reference_and_annotate_helices
 from src.assign_grns import align_and_assign_grn
-from src.lyr_processing import process_lyr_in_processor_data
+from src.lyr_processing import process_lyr_in_processor_data, standardize_retinal_naming
+
+
+# =============================================================================
+# Compatibility class for error_analysis (must be at module level for pickling)
+# =============================================================================
+
+class DatasetCompat:
+    """Compatibility class to provide pdb_ids and data for legacy error_analysis code."""
+    def __init__(self, pdb_ids, data=None):
+        self.pdb_ids = list(pdb_ids)
+        self.data = data if data is not None else pd.DataFrame()
+
+    def format_data_types(self):
+        """Format data types for compatibility with legacy code."""
+        if self.data.empty:
+            return
+        # Ensure coordinate columns are numeric
+        for col in ['x', 'y', 'z']:
+            if col in self.data.columns:
+                self.data[col] = pd.to_numeric(self.data[col], errors='coerce')
 
 
 # =============================================================================
@@ -178,6 +198,8 @@ def load_structures_from_datasets(
 
         # Load structures using new API
         loaded_count = 0
+        lyr_count = 0
+        lig_count = 0
         for struct_id in structure_ids:
             try:
                 df = processor.load_entity(struct_id)
@@ -190,6 +212,17 @@ def load_structures_from_datasets(
                     # Add pdb_id alias for backward compatibility
                     if "structure_id" in df_reset.columns and "pdb_id" not in df_reset.columns:
                         df_reset["pdb_id"] = df_reset["structure_id"]
+
+                    # CRITICAL: Standardize retinal naming EARLY (before any caching)
+                    # This converts LYR → LYS + RET and LIG → RET
+                    had_lyr = (df_reset['res_name3l'] == 'LYR').any() if 'res_name3l' in df_reset.columns else False
+                    had_lig = (df_reset['res_name3l'] == 'LIG').any() if 'res_name3l' in df_reset.columns else False
+                    df_reset = standardize_retinal_naming(df_reset, retinal_res_name=retinal_name, verbose=False)
+                    if had_lyr:
+                        lyr_count += 1
+                    if had_lig:
+                        lig_count += 1
+
                     all_structures[struct_id] = {
                         "dataset": dataset_name,
                         "df": df_reset,
@@ -199,6 +232,8 @@ def load_structures_from_datasets(
                 print(f"[WARN] Failed to load {struct_id}: {e}")
 
         print(f"[INFO] Loaded {loaded_count}/{len(structure_ids)} structures for {dataset_name}")
+        if lyr_count > 0 or lig_count > 0:
+            print(f"[INFO] Retinal standardized: {lyr_count} LYR→LYS+RET, {lig_count} LIG→RET")
 
     if not all_structures:
         print("[ERROR] No structures loaded!")
@@ -215,10 +250,14 @@ def load_structures_from_datasets(
         if df.empty:
             continue
 
-        # Handle LIG -> RET renaming for predicted structures
-        if "res_name3l" in df.columns:
+        # For predicted structures (_model_0), set all chains to A
+        # (Boltz puts protein on chain A but LIG on chain B)
+        if "_model_0" in struct_id:
             df = df.copy()
-            df.loc[df["res_name3l"] == "LIG", "res_name3l"] = retinal_name
+            df["auth_chain_id"] = chain_id
+
+        # NOTE: LYR→LYS+RET and LIG→RET conversion is now done earlier
+        # in the loading phase (standardize_retinal_naming)
 
         # Filter by chain
         df_chain = df[df["auth_chain_id"] == chain_id].copy()
@@ -226,14 +265,14 @@ def load_structures_from_datasets(
         if df_chain.empty:
             continue
 
-        # Find retinal
+        # Find retinal (now consistently named RET after standardization)
         df_ret = df_chain[df_chain["res_name3l"] == retinal_name].copy()
 
         # Filter to keep only ATOM records and retinal HETATM
+        # Note: LYR is now converted to LYS (ATOM) + RET (HETATM)
         is_atom = df_chain["group"] == "ATOM"
         is_ret = (df_chain["group"] == "HETATM") & (df_chain["res_name3l"] == retinal_name)
-        is_lyr = (df_chain["group"] == "HETATM") & (df_chain["res_name3l"] == "LYR")
-        df_filtered = df_chain[is_atom | is_ret | is_lyr].copy()
+        df_filtered = df_chain[is_atom | is_ret].copy()
 
         # Create normalized dataframe
         df_norm = df_filtered.copy()
@@ -264,11 +303,58 @@ def load_structures_from_datasets(
     structure_mapping = load_structure_mapping()
     print(f"[INFO] Loaded {len(structure_mapping)} exp-pred structure pairs")
 
+    # Create compatibility objects for error_analysis (expects cp_mo_exp, etc.)
+    # Map dataset names to legacy processor names
+    # mo_exp_A/B -> cp_mo_exp, mo_pred_exp/novel -> cp_mo_pred
+    # hide_exp -> cp_hide_exp, hide_pred -> cp_hide_pred
+    mo_exp_ids = set()
+    mo_pred_ids = set()
+    hide_exp_ids = set()
+    hide_pred_ids = set()
+
+    for ds_name, ids in dataset_contents.items():
+        if ds_name in ["mo_exp_A", "mo_exp_B"]:
+            mo_exp_ids.update(ids)
+        elif ds_name in ["mo_pred_exp", "mo_pred_novel"]:
+            mo_pred_ids.update(ids)
+        elif ds_name == "hide_exp":
+            hide_exp_ids.update(ids)
+        elif ds_name == "hide_pred":
+            hide_pred_ids.update(ids)
+
+    # Build combined DataFrames for each group
+    def build_combined_df(pdb_ids):
+        """Combine structure DataFrames into one with pdb_id column."""
+        dfs = []
+        for pdb_id in pdb_ids:
+            if pdb_id in processed_structures and 'df' in processed_structures[pdb_id]:
+                df = processed_structures[pdb_id]['df'].copy()
+                df['pdb_id'] = pdb_id
+                dfs.append(df)
+        return pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame()
+
+    mo_exp_df = build_combined_df(mo_exp_ids)
+    mo_pred_df = build_combined_df(mo_pred_ids)
+    hide_exp_df = build_combined_df(hide_exp_ids)
+    hide_pred_df = build_combined_df(hide_pred_ids)
+
+    cp_mo_exp = DatasetCompat(mo_exp_ids, mo_exp_df)
+    cp_mo_pred = DatasetCompat(mo_pred_ids, mo_pred_df)
+    cp_hide_exp = DatasetCompat(hide_exp_ids, hide_exp_df)
+    cp_hide_pred = DatasetCompat(hide_pred_ids, hide_pred_df)
+
+    print(f"[INFO] Dataset compatibility: mo_exp={len(mo_exp_ids)}, mo_pred={len(mo_pred_ids)}, hide_exp={len(hide_exp_ids)}, hide_pred={len(hide_pred_ids)}")
+
     result = {
         "processed_structures": processed_structures,
         "structure_mapping": structure_mapping,
         "processor": processor,
         "datasets": dataset_contents,
+        # Legacy compatibility for error_analysis
+        "cp_mo_exp": cp_mo_exp,
+        "cp_mo_pred": cp_mo_pred,
+        "cp_hide_exp": cp_hide_exp,
+        "cp_hide_pred": cp_hide_pred,
     }
 
     # Save to cache
@@ -493,7 +579,9 @@ def run_opsin_analysis_workflow(
 
     if comparison_data is None:
         try:
-            comparison_data = compare_structures(data, str(output_dir), visualize=visualize)
+            comparison_data = compare_structures(
+                data, str(output_dir), visualize=visualize
+            )
             data.update(comparison_data)
 
             if use_cache:

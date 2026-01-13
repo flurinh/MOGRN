@@ -1055,8 +1055,12 @@ def plot_distances_with_std(distance_table, title="Distance to Retinal by Positi
     # ax.text(text_x_pos_lines, 6.0, '6.0 Å', va='center_baseline', ha='right', color=h_line_style['color'], fontsize=11)
 
     ax.grid(True, alpha=0.3, axis='y', linestyle=':')  # Keep y-axis grid, make it dotted
-    ax.set_xlabel('Transmembrane Position (Sorted)', fontsize=16)  # Updated X-label
-    ax.set_ylabel(f'Distance to Retinal (Å){" - CA" if use_ca else ""}', fontsize=16)  # Combined label
+    ax.set_xlabel('GRN Position', fontsize=14, fontweight='bold')  # Cleaner X-label
+    ax.set_ylabel('Distance (Å)', fontsize=14, fontweight='bold')  # Cleaner Y-label, same size as H1-H7
+
+    # Make y-axis tick labels bigger (same as H1-H7 labels)
+    ax.tick_params(axis='y', labelsize=14)
+    ax.tick_params(axis='x', labelsize=14)
 
     if y_means_final:
         max_y_err_val = max(y_errors_final) if y_errors_final else 0  # Renamed
@@ -1066,17 +1070,21 @@ def plot_distances_with_std(distance_table, title="Distance to Retinal by Positi
     else:
         ax.set_ylim(0, 10)
 
-    ax.set_title(f"{title} ({'CA Atoms' if use_ca else 'All Atoms'})", fontsize=20)
+    # Cleaner title
+    atom_type = "Cα" if use_ca else "All-Atom"
+    ax.set_title(f"Distance to Retinal ({atom_type})", fontsize=16, fontweight='bold')
 
     legend_elements_list = [  # Renamed
-        Patch(color=HELIX_NUMBER_COLORS[h_idx], label=f"Helix {h_idx}")
+        Patch(color=HELIX_NUMBER_COLORS[h_idx], label=f"H{h_idx}")
         for h_idx in range(1, 8) if h_idx in HELIX_NUMBER_COLORS
     ]
     if legend_elements_list:
-        ax.legend(handles=legend_elements_list, loc='upper right', ncol=2, fontsize=12,
-                  title="TM Helices", title_fontsize=13, frameon=True, framealpha=0.85)  # Added title
+        # Place legend outside the plot area, to the upper right
+        ax.legend(handles=legend_elements_list, loc='upper left', bbox_to_anchor=(1.01, 1.0),
+                  ncol=1, fontsize=14, title="Helix", title_fontsize=14,
+                  frameon=True, framealpha=0.85)
 
-    plt.tight_layout()
+    plt.tight_layout(rect=[0, 0, 0.88, 1])  # Make room for legend on the right
     return fig
 
 

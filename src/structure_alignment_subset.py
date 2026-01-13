@@ -50,10 +50,10 @@ def _select_structures(structures: Dict[str, dict], max_structures: int, referen
 
 def create_subset_alignment_visualization(
     cache_dir: str = "opsin_output/cache",
-    property_file: str = "property/mo_exp.csv",
-    grn_file: str = "opsin_output/curated_grn.csv",
+    property_file: str = "property/mo_exp_ST1.csv",
+    grn_file: str = "opsin_output/curated_grn_postprocessed.csv",
     output_file: str = "opsin_output/interactive_grn_alignment_subset.html",
-    reference_id: str = "MerMAID1_model_0",
+    reference_id: str = "6xl3",
     max_structures: int = 30,
     show_membrane: bool = True,
     membrane_opacity: float = 0.05,
@@ -120,11 +120,11 @@ def create_subset_alignment_visualization(
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Create a reduced HTML structure alignment figure")
     parser.add_argument('--cache-dir', default='opsin_output/cache', help='Workflow cache directory')
-    parser.add_argument('--property-file', default='property/mo_exp.csv', help='Path to property CSV file')
-    parser.add_argument('--grn-file', default='opsin_output/curated_grn.csv', help='Path to curated GRN table')
+    parser.add_argument('--property-file', default='property/mo_exp_ST1.csv', help='Path to property CSV file')
+    parser.add_argument('--grn-file', default='opsin_output/curated_grn_postprocessed.csv', help='Path to curated GRN table')
     parser.add_argument('--output-file', default='opsin_output/interactive_grn_alignment_subset.html',
                         help='Destination HTML file')
-    parser.add_argument('--reference-id', default='MerMAID1_model_0', help='Reference structure for alignment')
+    parser.add_argument('--reference-id', default='6xl3', help='Reference structure for alignment')
     parser.add_argument('--max-structures', type=int, default=30, help='Maximum structures to include')
     parser.add_argument('--hide-membrane', action='store_true', help='Disable the membrane volume overlay')
     parser.add_argument('--membrane-opacity', type=float, default=0.05, help='Membrane opacity in the figure')

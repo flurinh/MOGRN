@@ -152,8 +152,13 @@ def create_msa_table(seq_alignment_dicts, processed_structures_complete, global_
         type_to_global = global_alignments.get(type_ref, {})
         
         for struct_id, alignment in structs.items():
+            # Skip structures that already have a global alignment
+            # (global alignment should take priority over type alignment)
+            if struct_id in global_alignments:
+                continue
+
             struct = processed_structures_complete[struct_id]
-            
+
             # Get appropriate dataframe
             if atom_type == "CA":
                 struct_df = struct['df_ca_norm']
@@ -957,7 +962,7 @@ def calculate_helix_distances(distance_table):
     return helix_stats
 
 def generate_grn_msa_tables(seq_alignment_dicts, processed_structures_complete, global_ref,
-                         rmsd_df=None, max_rmsd_threshold=3.0, structure_mapping=None,
+                         rmsd_df=None, max_rmsd_threshold=3.5, structure_mapping=None,
                          helices_file='property/helices_curated.json'):
     """
     Creates all MSA tables with proper GRN (Generic Residue Numbering) column names.
@@ -974,7 +979,7 @@ def generate_grn_msa_tables(seq_alignment_dicts, processed_structures_complete, 
         processed_structures_complete: Dictionary with structure data
         global_ref: ID of global reference structure
         rmsd_df: Optional DataFrame with RMSD values between structures
-        max_rmsd_threshold: Maximum RMSD to global reference for inclusion (default: 3.0)
+        max_rmsd_threshold: Maximum RMSD to global reference for inclusion (default: 3.5)
         structure_mapping: Optional mapping from experimental to predicted structures
         helices_file: Path to JSON file containing helix boundaries (default: 'property/helices_curated.json')
 

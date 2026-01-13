@@ -275,32 +275,40 @@ def generate_transitive_alignment_paths(alignment_paths, structure_ids, alignmen
     
     return enhanced_paths
 
-def create_tree_based_seq_alignment_dicts(rmsd_df, alignment_paths, method='weighted'):
+def create_tree_based_seq_alignment_dicts(rmsd_df, alignment_paths, method='weighted', global_ref_override=None):
     """
     Create sequence alignment dictionaries using the similarity tree approach.
-    
+
     Args:
         rmsd_df: DataFrame with RMSD values
         alignment_paths: Dictionary with existing alignment paths
         method: Linkage method for tree construction (default: 'weighted')
-        
+        global_ref_override: Optional override for reference structure (uses global reference if provided)
+
     Returns:
         dict: Sequence alignment dictionary format compatible with generate_grn_msa_tables
     """
     # Extract structure IDs from RMSD matrix
     structure_ids = rmsd_df.index.tolist()
-    
+
     # Build the similarity tree
     Z, ordered_structure_ids = build_similarity_tree(rmsd_df, method=method)
-    
+
     # Create alignment pairs from the tree
     alignment_pairs = create_alignment_order(Z, structure_ids)
-    
+
     # Generate enhanced alignment paths with transitive mappings
     enhanced_paths = generate_transitive_alignment_paths(alignment_paths, structure_ids, alignment_pairs)
-    
-    # Select a central reference structure (structure with lowest sum of RMSD to all others)
-    central_ref = find_central_reference(rmsd_df)
+
+    # Use global reference override if provided, otherwise find central reference
+    if global_ref_override and global_ref_override in structure_ids:
+        central_ref = global_ref_override
+        print(f"[INFO] Using global reference override: {central_ref}")
+    else:
+        # Select a central reference structure (structure with lowest sum of RMSD to all others)
+        central_ref = find_central_reference(rmsd_df)
+        if global_ref_override:
+            print(f"[WARNING] Global reference override '{global_ref_override}' not found in structure list, using auto-selected: {central_ref}")
     
     # Generate group-specific references
     group_refs = {}

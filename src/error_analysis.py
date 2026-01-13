@@ -147,12 +147,27 @@ def calculate_structure_errors(data_dict, output_dir='outputs', visualize=True):
     # Create outputs directory if it doesn't exist
     os.makedirs(output_dir, exist_ok=True)
 
-    # Unpack necessary data
-    cp_mo_exp = data_dict['cp_mo_exp']
-    cp_mo_pred = data_dict['cp_mo_pred']
-    cp_hide_exp = data_dict['cp_hide_exp']
-    cp_hide_pred = data_dict['cp_hide_pred']
+    # Unpack necessary data - check if legacy processors are available
+    cp_mo_exp = data_dict.get('cp_mo_exp')
+    cp_mo_pred = data_dict.get('cp_mo_pred')
+    cp_hide_exp = data_dict.get('cp_hide_exp')
+    cp_hide_pred = data_dict.get('cp_hide_pred')
     processed_structures = data_dict['processed_structures']
+
+    # Check if we have full legacy processors or just compatibility objects
+    def is_full_processor(obj):
+        return obj is not None and hasattr(obj, 'format_data_types') and hasattr(obj, 'data')
+
+    has_full_processors = all(is_full_processor(p) for p in [cp_mo_exp, cp_mo_pred, cp_hide_exp, cp_hide_pred])
+
+    if not has_full_processors:
+        print("[INFO] Legacy processor objects not available - skipping detailed error calculation")
+        print("[INFO] To run error calculation, use the legacy data_processing workflow")
+        return {
+            'error_results': {},
+            'hide_errors_df': pd.DataFrame(),
+            'mo_exp_errors_df': pd.DataFrame(),
+        }
 
     # Use the GLOBALLY DEFINED structure mapping - don't recreate it
     structure_mapping = data_dict.get('structure_mapping', {})

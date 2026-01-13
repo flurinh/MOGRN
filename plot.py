@@ -121,7 +121,7 @@ def load_structure_mapping(output_dir: Path) -> Dict[str, str]:
 def load_property_data(property_file: Path = None) -> pd.DataFrame:
     """Load property data from CSV."""
     if property_file is None:
-        property_file = PROPERTY_DIR / "mo_exp.csv"
+        property_file = PROPERTY_DIR / "mo_exp_ST1.csv"
 
     if not property_file.exists():
         print(f"[WARN] Property file not found: {property_file}")
@@ -135,6 +135,18 @@ def load_property_data(property_file: Path = None) -> pd.DataFrame:
         df["molecular_function"] = df["molecular_function"].apply(
             lambda x: str(x).replace("?", "").strip() if pd.notna(x) else ""
         )
+
+    # Fix corrupted PDB IDs (Excel converts 1e12 to 1.00E+12)
+    if "PDB ID" in df.columns:
+        def fix_pdb_id(x):
+            if pd.isna(x):
+                return x
+            s = str(x).strip()
+            # Fix scientific notation: 1.00E+12 -> 1e12
+            if s.upper() == "1.00E+12" or s.upper() == "1E+12":
+                return "1E12"
+            return s
+        df["PDB ID"] = df["PDB ID"].apply(fix_pdb_id)
 
     return df
 
@@ -187,17 +199,18 @@ def create_property_distribution_figure(
     natural_domains: list,
     output_dir: Path,
 ):
-    """Create property distribution heatmaps."""
-    from src.opsin_color_scheme import RMSD_WHITE_TO_DARKGRAY_CMAP
+    """Create property distribution heatmaps as two separate figures."""
+    from src.opsin_color_scheme import RMSD_WHITE_TO_DARKGRAY_CMAP, RMSD_WHITE_TO_LIME_CMAP
 
     all_functions = sorted(set(p["molecular_function"] for p in combined_props))
     all_domains = sorted(natural_domains)
 
-    fig = plt.figure(figsize=(20, 14))
-    gs = fig.add_gridspec(3, 3, height_ratios=[2, 2, 1], hspace=0.3, wspace=0.25)
+    # =========================================================================
+    # Figure 06a: Combined dataset
+    # =========================================================================
+    fig_a = plt.figure(figsize=(12, 8))
+    ax1 = fig_a.add_subplot(111)
 
-    # Combined heatmap
-    ax1 = fig.add_subplot(gs[0, :])
     df_combined = pd.DataFrame(combined_props)
     pivot_combined = pd.crosstab(df_combined["molecular_function"], df_combined["domain"])
     pivot_combined = pivot_combined.reindex(index=all_functions, columns=all_domains, fill_value=0)
@@ -212,16 +225,28 @@ def create_property_distribution_figure(
         cmap=RMSD_WHITE_TO_DARKGRAY_CMAP,
         linewidths=0.5,
         linecolor="gray",
-        cbar_kws={"label": "Count"},
+        cbar=False,
         vmin=0,
         ax=ax1,
     )
     ax1.set_xlabel("Domain", fontsize=14)
     ax1.set_ylabel("Molecular Function", fontsize=14)
-    ax1.set_title("Combined Dataset (Experimental + Predicted-only)", fontsize=16)
+    ax1.set_title(f"Combined Dataset (n={len(combined_props)})", fontsize=16)
+
+    plt.tight_layout()
+    fig_path_a = output_dir / "06a_property_combined.png"
+    plt.savefig(fig_path_a, dpi=300, bbox_inches="tight")
+    plt.close(fig_a)
+    print(f"[OK] Saved: {fig_path_a}")
+
+    # =========================================================================
+    # Figure 06b: Experimental and Predicted side-by-side
+    # =========================================================================
+    fig_b = plt.figure(figsize=(14, 7))
+    gs = fig_b.add_gridspec(1, 2, wspace=0.3)
 
     # Experimental heatmap
-    ax2a = fig.add_subplot(gs[1, 0])
+    ax2a = fig_b.add_subplot(gs[0, 0])
     if experimental_props:
         df_exp = pd.DataFrame(experimental_props)
         pivot_exp = pd.crosstab(df_exp["molecular_function"], df_exp["domain"])
@@ -234,12 +259,15 @@ def create_property_distribution_figure(
             fmt="",
             cmap=RMSD_WHITE_TO_DARKGRAY_CMAP,
             linewidths=0.5,
+            cbar=False,
             ax=ax2a,
         )
-        ax2a.set_title(f"Experimental Only (n={len(experimental_props)})")
+    ax2a.set_xlabel("Domain", fontsize=12)
+    ax2a.set_ylabel("Molecular Function", fontsize=12)
+    ax2a.set_title(f"Experimental (n={len(experimental_props)})", fontsize=14)
 
-    # Predicted-only heatmap
-    ax2b = fig.add_subplot(gs[1, 1])
+    # Predicted heatmap
+    ax2b = fig_b.add_subplot(gs[0, 1])
     if predicted_only_props:
         df_pred = pd.DataFrame(predicted_only_props)
         pivot_pred = pd.crosstab(df_pred["molecular_function"], df_pred["domain"])
@@ -250,54 +278,20 @@ def create_property_distribution_figure(
             pivot_pred,
             annot=annot_pred,
             fmt="",
-            cmap="YlOrRd",
+            cmap=RMSD_WHITE_TO_LIME_CMAP,
             linewidths=0.5,
+            cbar=False,
             ax=ax2b,
         )
-        ax2b.set_title(f"Predicted-only (n={len(predicted_only_props)})")
+    ax2b.set_xlabel("Domain", fontsize=12)
+    ax2b.set_ylabel("Molecular Function", fontsize=12)
+    ax2b.set_title(f"Predicted (n={len(predicted_only_props)})", fontsize=14)
 
-    # Difference heatmap
-    ax2c = fig.add_subplot(gs[1, 2])
-    if experimental_props and predicted_only_props:
-        pivot_diff = pivot_combined - pivot_exp
-        sns.heatmap(
-            pivot_diff,
-            annot=True,
-            fmt="d",
-            cmap="Reds",
-            linewidths=0.5,
-            ax=ax2c,
-        )
-        ax2c.set_title("Prediction Contribution")
-
-    # Missing combinations
-    ax3 = fig.add_subplot(gs[2, :])
-    ax3.axis("off")
-
-    all_combos = [(f, d) for f in all_functions for d in all_domains]
-    observed = set((r["molecular_function"], r["domain"]) for r in combined_props)
-    missing = [c for c in all_combos if c not in observed]
-
-    text = "Missing Function-Domain Combinations:\n"
-    if missing:
-        by_func = {}
-        for func, domain in missing:
-            by_func.setdefault(func, []).append(domain)
-        for func, domains in by_func.items():
-            text += f"  {func}: {', '.join(domains)}\n"
-        text += f"\nCoverage: {len(observed) / len(all_combos) * 100:.1f}%"
-    else:
-        text += "All combinations represented!"
-
-    ax3.text(0.05, 0.95, text, transform=ax3.transAxes, fontsize=11, va="top", family="monospace")
-
-    plt.suptitle("Microbial Opsin Property Analysis", fontsize=18)
     plt.tight_layout()
-
-    fig_path = output_dir / "06_property_analysis.png"
-    plt.savefig(fig_path, dpi=300, bbox_inches="tight")
-    plt.close()
-    print(f"[OK] Saved: {fig_path}")
+    fig_path_b = output_dir / "06b_property_split.png"
+    plt.savefig(fig_path_b, dpi=300, bbox_inches="tight")
+    plt.close(fig_b)
+    print(f"[OK] Saved: {fig_path_b}")
 
 
 def create_property_analysis(
@@ -305,42 +299,75 @@ def create_property_analysis(
     property_df: pd.DataFrame,
     structure_mapping: dict,
     output_dir: Path,
+    rmsd_df: pd.DataFrame = None,
 ):
     """Create property analysis visualizations."""
     print("\n[PROPERTY ANALYSIS] Generating property visualizations...")
 
-    NATURAL_DOMAINS = ["Eukaryota", "Bacteria", "Archaea"]
+    # Filter to only structures in RMSD matrix if provided
+    if rmsd_df is not None and not rmsd_df.empty:
+        rmsd_structures = set(rmsd_df.index)
+        structures_to_analyze = {k: v for k, v in processed_structures.items() if k in rmsd_structures}
+        print(f"  Filtered to {len(structures_to_analyze)} structures in RMSD matrix")
+    else:
+        structures_to_analyze = processed_structures
 
     # Build property lookup
     props_by_id = {}
     for _, row in property_df.iterrows():
         row_dict = row.to_dict()
+        domain = row_dict.get("Rhodopsin Type (Microbial)", "Unknown")
+        mol_func = row_dict.get("molecular_function", "Unknown")
+        # Normalize to capitalized "Unknown" to match color scheme
+        if str(domain).lower() == "unknown" or pd.isna(domain) or domain == "":
+            domain = "Unknown"
+        if str(mol_func).lower() == "unknown" or pd.isna(mol_func) or mol_func == "":
+            mol_func = "Unknown"
         props = {
-            "domain": row_dict.get("Rhodopsin Type (Microbial)", "Unknown"),
-            "molecular_function": row_dict.get("molecular_function", "Unknown"),
+            "domain": domain,
+            "molecular_function": mol_func,
         }
 
         pdb_id = str(row_dict.get("PDB ID", "")).strip().lower()
         short_name = str(row_dict.get("short_name", "")).strip()
 
-        if pdb_id:
+        if pdb_id and pdb_id != "nan":
             props_by_id[pdb_id] = props
-        if short_name:
+        if short_name and short_name != "nan":
             props_by_id[short_name + "_model_0"] = props
 
-    # Collect properties
+    def get_props(struct_id: str) -> dict:
+        """Get properties for a structure, handling special naming patterns."""
+        if struct_id in props_by_id:
+            return props_by_id[struct_id]
+        # Handle Hideaki structures: TsChR_J132_refine3 -> TsChR
+        if "_J" in struct_id and "_refine" in struct_id:
+            base_name = struct_id.split("_J")[0]
+            if base_name + "_model_0" in props_by_id:
+                return props_by_id[base_name + "_model_0"]
+            if base_name.lower() in props_by_id:
+                return props_by_id[base_name.lower()]
+        return {}
+
+    # Collect properties - include ALL structures, not just natural domains
     experimental_props = []
     predicted_only_props = []
     combined_props = []
+    all_domains = set()
 
     pred_with_exp = set(structure_mapping.values())
 
-    for struct_id in processed_structures:
-        props = props_by_id.get(struct_id, {})
-        if not props or props.get("domain", "Unknown") not in NATURAL_DOMAINS:
-            continue
+    for struct_id in structures_to_analyze:
+        props = get_props(struct_id)
+        if not props:
+            # Assign default props for structures without property data
+            props = {"domain": "Unknown", "molecular_function": "Unknown"}
 
-        is_predicted = "_model_0" in struct_id or "_pred" in struct_id
+        all_domains.add(props["domain"])
+
+        # Hideaki structures (*_J###_refine#) are experimental, not predicted
+        is_hideaki = "_J" in struct_id and "_refine" in struct_id
+        is_predicted = ("_model_0" in struct_id or "_pred" in struct_id) and not is_hideaki
 
         if not is_predicted:
             experimental_props.append(props)
@@ -353,13 +380,14 @@ def create_property_analysis(
     print(f"  Experimental: {len(experimental_props)}")
     print(f"  Predicted-only: {len(predicted_only_props)}")
     print(f"  Combined: {len(combined_props)}")
+    print(f"  Domains: {sorted(all_domains)}")
 
     if combined_props:
         create_property_distribution_figure(
             experimental_props,
             predicted_only_props,
             combined_props,
-            NATURAL_DOMAINS,
+            sorted(all_domains),
             output_dir,
         )
 
@@ -420,7 +448,9 @@ def main(args=None):
 
     processed_structures = data.get("processed_structures", {})
     structure_mapping = data.get("structure_mapping", {})
-    rmsd_df = data.get("rmsd_matrix") or data.get("rmsd_df")
+    rmsd_df = data.get("rmsd_df")
+    if rmsd_df is None or (isinstance(rmsd_df, pd.DataFrame) and rmsd_df.empty):
+        rmsd_df = data.get("rmsd_matrix")
 
     if not processed_structures:
         print("[ERROR] No processed structures found!")
@@ -430,7 +460,7 @@ def main(args=None):
     print(f"[INFO] Structure mapping pairs: {len(structure_mapping)}")
 
     # Load property data
-    property_file = PROPERTY_DIR / "mo_exp.csv"
+    property_file = PROPERTY_DIR / "mo_exp_ST1.csv"
     property_df = load_property_data(property_file)
 
     # Create property lookup
@@ -438,20 +468,46 @@ def main(args=None):
     for _, row in property_df.iterrows():
         pdb_id = str(row.get("PDB ID", "")).strip().lower()
         short_name = str(row.get("short_name", "")).strip()
+        domain = row.get("Rhodopsin Type (Microbial)", "Unknown")
+        mol_func = row.get("molecular_function", "Unknown")
+        # Normalize to capitalized "Unknown" to match color scheme
+        if str(domain).lower() == "unknown" or pd.isna(domain) or domain == "":
+            domain = "Unknown"
+        if str(mol_func).lower() == "unknown" or pd.isna(mol_func) or mol_func == "":
+            mol_func = "Unknown"
         props = {
-            "domain": row.get("Rhodopsin Type (Microbial)", "Unknown"),
-            "molecular_function": row.get("molecular_function", "Unknown"),
+            "domain": domain,
+            "molecular_function": mol_func,
         }
-        if pdb_id:
+        if pdb_id and pdb_id != "nan":
             property_data[pdb_id] = props
-        if short_name:
+        if short_name and short_name != "nan":
             property_data[short_name + "_model_0"] = props
+
+    def get_structure_props(struct_id: str) -> dict:
+        """Get properties for a structure, handling special naming patterns."""
+        # Direct match
+        if struct_id in property_data:
+            return property_data[struct_id]
+
+        # Handle Hideaki structures with _J###_refine# pattern
+        # e.g., TsChR_J132_refine3 -> TsChR
+        if "_J" in struct_id and "_refine" in struct_id:
+            base_name = struct_id.split("_J")[0]
+            # Try matching to short_name + _model_0
+            if base_name + "_model_0" in property_data:
+                return property_data[base_name + "_model_0"]
+            # Also try direct match (in case it's in PDB format)
+            if base_name.lower() in property_data:
+                return property_data[base_name.lower()]
+
+        return {}
 
     # Create group/domain dicts for visualizations
     group_dict = {}
     domain_dict = {}
     for sid in processed_structures:
-        props = property_data.get(sid, {})
+        props = get_structure_props(sid)
         group_dict[sid] = props.get("molecular_function", "Unknown")
         domain_dict[sid] = {"domain": props.get("domain", "Unknown")}
 
@@ -463,7 +519,7 @@ def main(args=None):
         try:
             overview_list = []
             for sid in processed_structures:
-                props = property_data.get(sid, {})
+                props = get_structure_props(sid)
                 is_pred = "_model_0" in sid or "_pred" in sid
                 overview_list.append({
                     "id": sid,
@@ -601,9 +657,13 @@ def main(args=None):
         ca_distance_table = data.get("ca_distance_table")
 
         # Load residue table for filtering
-        residue_table = data.get("msa_df") or data.get("msa_table") or data.get("residue_table")
+        residue_table = data.get("msa_df")
         if residue_table is None or (isinstance(residue_table, pd.DataFrame) and residue_table.empty):
-            curated_grn_path = input_dir / "curated_grn.csv"
+            residue_table = data.get("msa_table")
+        if residue_table is None or (isinstance(residue_table, pd.DataFrame) and residue_table.empty):
+            residue_table = data.get("residue_table")
+        if residue_table is None or (isinstance(residue_table, pd.DataFrame) and residue_table.empty):
+            curated_grn_path = input_dir / "curated_grn_postprocessed.csv"
             if curated_grn_path.exists():
                 residue_table = pd.read_csv(curated_grn_path, index_col=0)
 
@@ -675,9 +735,13 @@ def main(args=None):
     if args.only is None or args.only == "logo":
         print("\n[VIZ 6] Helix Logo Plots...")
 
-        residue_table = data.get("msa_df") or data.get("msa_table") or data.get("residue_table")
+        residue_table = data.get("msa_df")
         if residue_table is None or (isinstance(residue_table, pd.DataFrame) and residue_table.empty):
-            curated_grn_path = input_dir / "curated_grn.csv"
+            residue_table = data.get("msa_table")
+        if residue_table is None or (isinstance(residue_table, pd.DataFrame) and residue_table.empty):
+            residue_table = data.get("residue_table")
+        if residue_table is None or (isinstance(residue_table, pd.DataFrame) and residue_table.empty):
+            curated_grn_path = input_dir / "curated_grn_postprocessed.csv"
             if curated_grn_path.exists():
                 residue_table = pd.read_csv(curated_grn_path, index_col=0)
 
@@ -717,6 +781,7 @@ def main(args=None):
                     property_df,
                     structure_mapping,
                     output_dir,
+                    rmsd_df=rmsd_df,
                 )
             except Exception as e:
                 print(f"[ERROR] Property analysis failed: {e}")
@@ -733,7 +798,7 @@ def main(args=None):
                 cache_dir=str(cache_dir),
                 property_file=str(property_file),
                 output_file=str(interactive_path),
-                max_structures=100,
+                max_structures=150,
                 show_membrane=True,
                 membrane_opacity=0.05,
             )
@@ -746,7 +811,7 @@ def main(args=None):
                 cache_dir=str(cache_dir),
                 property_file=str(property_file),
                 output_file=str(interactive_path_b),
-                max_structures=100,
+                max_structures=150,
                 show_membrane=True,
                 membrane_opacity=0.05,
             )

@@ -281,3 +281,84 @@ Common issues and solutions:
 1. **Missing structures**: Ensure all CIF files are in correct directories
 2. **Memory errors**: Use `--no-cache` flag or process in batches
 3. **Import errors**: Verify Protos installation with `python -c "import protos"`
+
+---
+
+## Development Status (2026-01-05)
+
+### Current Goals
+
+We are working on improving the GRN alignment quality and visualization:
+
+1. **GRN Alignment Quality Control**
+   - Ensuring all structures are properly aligned to a global reference
+   - Detecting misaligned residues by comparing to consensus positions
+   - Validating lysine anchor at position 7.50 across all structures
+
+2. **Global Reference Selection**
+   - Changed global reference from `MerMAID1_model_0` to **`1jgj`** (Sensory Rhodopsin II)
+   - 1jgj chosen for having best alignment quality (lowest mean distance from consensus)
+
+3. **Interactive Visualization**
+   - Centering coordinates on overall center for better rotation
+   - Property mapping from `mo_exp_ST1.csv` for domain and molecular function
+   - Handling Hideaki structure naming patterns (e.g., `TsChR_J132_refine3`)
+
+### Recent Changes
+
+- **Global reference**: Set to `1jgj` in all visualization and alignment modules
+- **Property file**: Updated to use `mo_exp_ST1.csv`
+- **PDB ID parsing**: Fixed scientific notation issue where `1e12` was read as `1.00E+12`
+- **Coordinate centering**: Changed from retinal-center to overall-center for interactive plots
+- **Misalignment detection**: Created `scripts/detect_misalignment.py` to identify outliers
+
+### Completed Tasks
+
+- [x] Set global reference to `1jgj` in source files
+- [x] Delete all cache files and regenerate
+- [x] Rerun structure comparison workflow with new reference
+- [x] Run misalignment detection analysis
+
+### Pending Tasks / Known Issues
+
+- [ ] Investigate **7pl9** - severely misaligned (22 Å mean distance, 99% outliers)
+- [ ] Investigate **OcHeR_model_0** - systematic issues (6 Å mean distance, 88% outliers)
+- [ ] Investigate **7aky** and **AbHeR_model_0** - moderate issues (~5 Å mean distance)
+- [ ] Review structures with localized issues at helix termini
+- [ ] Validate postprocessor K-anchor shifts
+
+### Misalignment Analysis Results
+
+With `1jgj` as global reference:
+
+| Structure | Mean Distance (Å) | Outlier % | Status |
+|-----------|-------------------|-----------|--------|
+| 7pl9 | 22.05 | 99.4% | Needs investigation |
+| OcHeR_model_0 | 6.07 | 87.8% | Needs investigation |
+| 7aky | 5.11 | 40% | Moderate issues |
+| AbHeR_model_0 | 4.96 | 37% | Moderate issues |
+| VbACR2_model_0 | 3.48 | 16% | Localized issues |
+| Most structures | < 2 Å | < 5% | Good alignment |
+
+### Key Files Modified
+
+- `src/visualize_alignment_grn.py` - Reference defaults changed to `1jgj`
+- `src/structure_alignment_subset.py` - Reference defaults changed to `1jgj`
+- `scripts/detect_misalignment.py` - New script for alignment quality control
+- `scripts/postprocess_grn_table.py` - GRN postprocessing with K-anchor validation
+- `plot.py` - Property mapping and Hideaki structure handling
+
+### Running the Analysis
+
+```bash
+# Full workflow with 1jgj reference
+python opsin_analysis_workflow.py --global-ref 1jgj --skip-prepare
+
+# Misalignment detection
+python scripts/detect_misalignment.py
+
+# Results saved to:
+# - opsin_output/misalignment_analysis/structure_outliers.csv
+# - opsin_output/misalignment_analysis/grn_statistics.csv
+# - opsin_output/misalignment_analysis/distance_matrix.csv
+```
