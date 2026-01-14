@@ -356,6 +356,8 @@ def create_property_analysis(
     all_domains = set()
 
     pred_with_exp = set(structure_mapping.values())
+    # Build reverse mapping: predicted_id -> experimental_id
+    exp_for_pred = {v: k for k, v in structure_mapping.items()}
 
     for struct_id in structures_to_analyze:
         props = get_props(struct_id)
@@ -374,8 +376,17 @@ def create_property_analysis(
             combined_props.append(props)
         else:
             if struct_id not in pred_with_exp:
+                # Predicted structure without experimental counterpart
                 predicted_only_props.append(props)
                 combined_props.append(props)
+            else:
+                # Check if experimental counterpart is actually in structures_to_analyze
+                exp_id = exp_for_pred.get(struct_id)
+                if exp_id and exp_id not in structures_to_analyze:
+                    # Experimental counterpart missing - count the predicted instead
+                    print(f"  [WARN] {struct_id} has exp counterpart {exp_id} not in RMSD matrix, counting predicted")
+                    predicted_only_props.append(props)
+                    combined_props.append(props)
 
     print(f"  Experimental: {len(experimental_props)}")
     print(f"  Predicted-only: {len(predicted_only_props)}")
@@ -546,31 +557,40 @@ def main(args=None):
     if args.only is None or args.only == "errors":
         print("\n[VIZ 2] Error Distribution...")
         try:
-            set_a_path = input_dir / "set_a_errors.csv"
-            set_b_path = input_dir / "set_b_errors.csv"
+            # Read the unified mo_exp_errors.csv and split by dataset_split
+            errors_path = input_dir / "mo_exp_errors.csv"
 
-            df_a = pd.read_csv(set_a_path) if set_a_path.exists() else pd.DataFrame()
-            df_b = pd.read_csv(set_b_path) if set_b_path.exists() else pd.DataFrame()
+            if errors_path.exists():
+                errors_df = pd.read_csv(errors_path)
 
-            if not df_a.empty or not df_b.empty:
-                if "dataset_split" not in df_a.columns and not df_a.empty:
+                # Split by dataset_split column
+                if "dataset_split" in errors_df.columns:
+                    df_a = errors_df[errors_df["dataset_split"] == "A"].copy()
+                    df_b = errors_df[errors_df["dataset_split"] == "B"].copy()
+                else:
+                    # If no split column, treat all as set A
+                    df_a = errors_df.copy()
                     df_a["dataset_split"] = "A"
-                if "dataset_split" not in df_b.columns and not df_b.empty:
-                    df_b["dataset_split"] = "B"
+                    df_b = pd.DataFrame()
 
-                fig_path = output_dir / "02c_error_distribution.png"
-                fig, summary = plot_error_box_comparison(
-                    df_a, df_b,
-                    metrics=["backbone_rmsd", "pocket_rmsd", "retinal_rmsd"],
-                    dataset_labels=("Benchmark set", "Blind test set"),
-                    output_path=fig_path,
-                )
-                plt.close(fig)
-                print(f"[OK] Saved: {fig_path}")
-                if not summary.empty:
-                    print(summary.round(3))
+                print(f"[INFO] Loaded {len(df_a)} set A and {len(df_b)} set B structures from {errors_path}")
+
+                if not df_a.empty or not df_b.empty:
+                    fig_path = output_dir / "02c_error_distribution.png"
+                    fig, summary = plot_error_box_comparison(
+                        df_a, df_b,
+                        metrics=["backbone_rmsd", "pocket_rmsd", "retinal_rmsd"],
+                        dataset_labels=("Benchmark set", "Blind test set"),
+                        output_path=fig_path,
+                    )
+                    plt.close(fig)
+                    print(f"[OK] Saved: {fig_path}")
+                    if not summary.empty:
+                        print(summary.round(3))
+                else:
+                    print("[WARN] Error CSV is empty")
             else:
-                print("[WARN] No error CSV files found")
+                print(f"[WARN] No error CSV found at {errors_path}")
         except Exception as e:
             print(f"[ERROR] Error plot failed: {e}")
             traceback.print_exc()

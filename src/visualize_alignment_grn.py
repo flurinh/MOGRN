@@ -82,6 +82,41 @@ def load_processed_structures(cache_dir="opsin_output/cache"):
     raise FileNotFoundError(f"No suitable processed structures cache found in {cache_path}")
 
 
+def load_alignment_transformations(cache_dir="opsin_output/cache", global_ref="7bmh"):
+    """Load pairwise alignment transformations from RMSD cache"""
+    cache_path = Path(cache_dir)
+    rmsd_cache_files = list(cache_path.glob("rmsd_cache*.pkl"))
+
+    if not rmsd_cache_files:
+        print("[WARN] No RMSD cache found for alignment transformations")
+        return {}
+
+    with open(rmsd_cache_files[0], 'rb') as f:
+        rmsd_cache = pickle.load(f)
+
+    alignment_paths = rmsd_cache.get('alignment_paths', {})
+
+    # Extract transformations to global reference
+    transformations = {}
+    for (src, tgt), data in alignment_paths.items():
+        if tgt == global_ref:
+            transformations[src] = {
+                'rotation': np.array(data['rotation']),
+                'translation': np.array(data['translation']),
+                'rmsd': data.get('rmsd', np.nan)
+            }
+
+    # Add identity for global ref itself
+    transformations[global_ref] = {
+        'rotation': np.eye(3),
+        'translation': np.zeros(3),
+        'rmsd': 0.0
+    }
+
+    print(f"Loaded {len(transformations)} alignment transformations to {global_ref}")
+    return transformations
+
+
 def load_grn_table(grn_file="opsin_output/curated_grn_postprocessed.csv"):
     """Load and parse the GRN table"""
     grn_path = Path(grn_file)
@@ -121,15 +156,29 @@ def parse_grn_residue(cell_value):
         return None, None
 
 
-def extract_ca_coordinates_with_grn(processed_structures, grn_df, chain_id='A', use_helix_only=True):
+def extract_ca_coordinates_with_grn(processed_structures, grn_df, chain_id='A', use_helix_only=True,
+                                     transformations=None, global_ref="7bmh"):
     """
-    Extract CA coordinates with GRN mapping for structures in GRN table
+    Extract CA coordinates with GRN mapping for structures in GRN table.
+
+    Args:
+        processed_structures: Dict of processed structure data
+        grn_df: GRN table DataFrame with structure IDs as index
+        chain_id: Chain to extract (default 'A')
+        use_helix_only: If True, filter to helix residues only
+        transformations: Dict of {struct_id: {'rotation': R, 'translation': t}} to align to global ref
+        global_ref: Global reference structure ID (default '7bmh')
     """
     all_structures = {}
     grn_structures = list(grn_df.index)
 
     # Create case-insensitive lookup for processed structures
     proc_lower_map = {k.lower(): k for k in processed_structures.keys()}
+
+    # Also create case-insensitive lookup for transformations if provided
+    trans_lower_map = {}
+    if transformations:
+        trans_lower_map = {k.lower(): k for k in transformations.keys()}
 
     for struct_id in grn_structures:
         # Try direct match first, then case-insensitive
@@ -258,9 +307,40 @@ def extract_ca_coordinates_with_grn(processed_structures, grn_df, chain_id='A', 
                     print(f"[WARN] Failed to capture retinal coordinates for {struct_id}: {retina_exc}")
                     retinal_info = None
 
+            # Extract raw coordinates
+            raw_coords = ca_data_with_grn[['x', 'y', 'z']].astype(float).values
+
+            # Apply alignment transformation if provided
+            aligned_coords = raw_coords
+            alignment_applied = False
+            if transformations:
+                # Try to find transformation for this structure
+                trans_key = None
+                if proc_id in transformations:
+                    trans_key = proc_id
+                elif proc_id.lower() in trans_lower_map:
+                    trans_key = trans_lower_map[proc_id.lower()]
+                elif struct_id in transformations:
+                    trans_key = struct_id
+                elif struct_id.lower() in trans_lower_map:
+                    trans_key = trans_lower_map[struct_id.lower()]
+
+                if trans_key:
+                    trans = transformations[trans_key]
+                    R = trans['rotation']
+                    t = trans['translation']
+                    # Apply transformation: coords_aligned = coords @ R.T + t
+                    aligned_coords = raw_coords @ R.T + t
+                    alignment_applied = True
+
+                    # Also transform retinal if present
+                    if retinal_info is not None:
+                        retinal_info['coords'] = retinal_info['coords'] @ R.T + t
+
             # Use proc_id (lowercase) as key to match alignment paths which use lowercase IDs
             all_structures[proc_id] = {
-                'coords': ca_data_with_grn[['x', 'y', 'z']].astype(float).values,
+                'coords': aligned_coords,
+                'coords_raw': raw_coords,  # Keep raw coords for reference
                 'residues': ca_data_with_grn['auth_seq_id'].values,
                 'grn_positions': ca_data_with_grn['grn_position'].values,
                 'grn': ca_data_with_grn['grn'].values,  # Direct GRN access
@@ -273,7 +353,8 @@ def extract_ca_coordinates_with_grn(processed_structures, grn_df, chain_id='A', 
                 'grn_to_seq': grn_to_seq,
                 'dataframe': ca_data_with_grn,  # Store the full dataframe for efficient access
                 'retinal': retinal_info,
-                'grn_table_id': struct_id  # Store original GRN table ID for reference
+                'grn_table_id': struct_id,  # Store original GRN table ID for reference
+                'alignment_applied': alignment_applied
             }
         else:
             print(f"Warning: No CA atoms found for {struct_id} after filtering")
@@ -923,10 +1004,29 @@ def create_interactive_opsin_visualization(
 
         structure_count += 1
 
-    all_grn_positions = sorted([grn for grn in grn_df.columns if grn in existing_grns])
+    # Filter to helix GRNs (1-7) from the table that exist in at least one structure
+    def is_helix_grn(grn):
+        """Check if GRN is a helix position (1.XX to 7.XX)"""
+        if not grn or pd.isna(grn):
+            return False
+        grn_str = str(grn)
+        if '.' not in grn_str:
+            return False
+        prefix = grn_str.split('.')[0]
+        if not prefix.isdigit():
+            return False
+        helix_num = int(prefix)
+        return 1 <= helix_num <= 7
+
+    # Get all helix GRNs from the table
+    helix_grns_in_table = [grn for grn in grn_df.columns if is_helix_grn(grn)]
+    # Filter to those that exist in at least one structure
+    all_grn_positions = sorted([grn for grn in helix_grns_in_table if grn in existing_grns],
+                                key=lambda x: (int(str(x).split('.')[0]), int(str(x).split('.')[1])))
     print(f"GRN positions in table: {len(grn_df.columns)}")
+    print(f"Helix GRNs (1-7) in table: {len(helix_grns_in_table)}")
     print(f"GRN positions in structures: {len(existing_grns)}")
-    print(f"Filtered GRN positions for slider: {len(all_grn_positions)}")
+    print(f"Helix GRN positions for slider: {len(all_grn_positions)}")
 
     helix_colors = {
         1: HELIX_NUMBER_COLORS[1],
@@ -1735,11 +1835,29 @@ def create_interactive_opsin_visualization_extended(
 
         structure_count += 1
 
-    # Filter to only GRNs that exist in structures, and sort them
-    all_grn_positions = sorted([grn for grn in grn_df.columns if grn in existing_grns])
+    # Filter to helix GRNs (1-7) from the table that exist in at least one structure
+    def is_helix_grn(grn):
+        """Check if GRN is a helix position (1.XX to 7.XX)"""
+        if not grn or pd.isna(grn):
+            return False
+        grn_str = str(grn)
+        if '.' not in grn_str:
+            return False
+        prefix = grn_str.split('.')[0]
+        if not prefix.isdigit():
+            return False
+        helix_num = int(prefix)
+        return 1 <= helix_num <= 7
+
+    # Get all helix GRNs from the table
+    helix_grns_in_table = [grn for grn in grn_df.columns if is_helix_grn(grn)]
+    # Filter to those that exist in at least one structure
+    all_grn_positions = sorted([grn for grn in helix_grns_in_table if grn in existing_grns],
+                                key=lambda x: (int(str(x).split('.')[0]), int(str(x).split('.')[1])))
     print(f"GRN positions in table: {len(grn_df.columns)}")
+    print(f"Helix GRNs (1-7) in table: {len(helix_grns_in_table)}")
     print(f"GRN positions in structures: {len(existing_grns)}")
-    print(f"Filtered GRN positions for slider: {len(all_grn_positions)}")
+    print(f"Helix GRN positions for slider: {len(all_grn_positions)}")
 
     # Helix color scheme (from opsin_color_scheme.py)
     helix_colors = {
@@ -2587,7 +2705,7 @@ def create_interactive_opsin_visualization_extended(
 def create_opsin_visualization_from_workflow(
     cache_dir="opsin_output/cache",
     property_file="property/mo_exp_ST1.csv",
-    grn_file="opsin_output/curated_grn.csv",
+    grn_file="opsin_output/curated_grn_postprocessed.csv",
     output_file="opsin_output/interactive_grn_alignment_3d.html",
     reference_id='6xl3',
     **viz_kwargs
@@ -2681,7 +2799,7 @@ def create_opsin_visualization_from_workflow(
 def create_opsin_visualization_from_workflow_b(
     cache_dir="opsin_output/cache",
     property_file="property/mo_exp_ST1.csv",
-    grn_file="opsin_output/curated_grn.csv",
+    grn_file="opsin_output/curated_grn_postprocessed.csv",
     output_file="opsin_output/interactive_grn_alignment_b.html",
     reference_id='6xl3',
     **viz_kwargs

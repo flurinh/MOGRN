@@ -14,7 +14,7 @@ import pickle
 import hashlib
 
 # Import error_analysis module from the local package
-from src.common_utils import compute_retinal_mean_closest_distance
+from src.common_utils import compute_retinal_mean_closest_distance, find_retinal_within_cutoff
 
 from src.visualization_functions import create_and_visualize_similarity_tree, visualize_rmsd_heatmap
 
@@ -314,35 +314,29 @@ def calculate_binding_pocket_rmsd_for_pairs(mapping_dict, exp_processor, pred_pr
             results[exp_id] = {'error': 'Data empty after coord cleaning'};
             continue
 
-        # STEP 1: Extract retinal DataFrames from UNTRANSFORMED DataFrames
-        # Experimental retinal (from original exp_df)
-        exp_ret_df_step1 = exp_df[exp_df['res_name3l'] == retinal_name]
+        # STEP 1: Get protein chain for retinal filtering
+        # First get protein atoms (excluding retinal) to use for retinal proximity filtering
+        exp_protein_df = exp_df[~exp_df['res_name3l'].isin([retinal_name, 'LIG', 'LYR'])]
+        pred_protein_df = pred_df_original_for_retinal_rmsd[
+            ~pred_df_original_for_retinal_rmsd['res_name3l'].isin([retinal_name, 'LIG', 'LYR'])]
+
+        # STEP 2: Extract retinal using proximity filtering (handles multiple retinal molecules)
+        # Experimental retinal - filter to retinal closest to protein chain
+        exp_ret_df_step1 = find_retinal_within_cutoff(exp_df, exp_protein_df, cutoff=10.0, retinal_name=retinal_name)
         if exp_ret_df_step1.empty:
             results[exp_id] = {'error': f'No exp retinal ({retinal_name})'};
             continue
 
-        # Predicted retinal (from original, untransformed pred_df_original_for_retinal_rmsd)
-        pred_ret_df_step1 = pred_df_original_for_retinal_rmsd[
-            pred_df_original_for_retinal_rmsd['res_name3l'] == retinal_name]
-        if pred_ret_df_step1.empty and retinal_name == 'RET':
-            pred_ret_df_step1 = pred_df_original_for_retinal_rmsd[
-                pred_df_original_for_retinal_rmsd['res_name3l'] == 'LIG']
-            if not pred_ret_df_step1.empty:
-                # If renaming, ensure all pred_df copies are consistent if 'LIG' might be used elsewhere
-                pred_df_original_for_retinal_rmsd.loc[
-                    pred_df_original_for_retinal_rmsd['res_name3l'] == 'LIG', 'res_name3l'] = 'RET'
-                pred_df_for_pocket_alignment.loc[
-                    pred_df_for_pocket_alignment['res_name3l'] == 'LIG', 'res_name3l'] = 'RET'
-                pred_ret_df_step1 = pred_df_original_for_retinal_rmsd[
-                    pred_df_original_for_retinal_rmsd['res_name3l'] == 'RET']
-
-        if pred_ret_df_step1.empty:  # This is the untransformed predicted retinal DataFrame
+        # Predicted retinal - filter to retinal closest to protein chain
+        pred_ret_df_step1 = find_retinal_within_cutoff(
+            pred_df_original_for_retinal_rmsd, pred_protein_df, cutoff=10.0, retinal_name=retinal_name)
+        if pred_ret_df_step1.empty:
             results[exp_id] = {'error': f'No pred retinal ({retinal_name} or LIG)'};
             continue
 
-        # STEP 2: Define EXPERIMENTAL binding pocket residues
+        # STEP 3: Define EXPERIMENTAL binding pocket residues
         exp_protein_ca_df_for_pocket = exp_df[
-            (exp_df['res_atom_name'].astype(str) == 'CA') & (exp_df['res_name3l'] != retinal_name)]
+            (exp_df['res_atom_name'].astype(str) == 'CA') & (~exp_df['res_name3l'].isin([retinal_name, 'LIG', 'LYR']))]
         if exp_protein_ca_df_for_pocket.empty:
             results[exp_id] = {'error': 'No exp protein CAs for pocket def'};
             continue
@@ -381,8 +375,9 @@ def calculate_binding_pocket_rmsd_for_pairs(mapping_dict, exp_processor, pred_pr
             results[exp_id] = {'error': 'No CAs for alignment'};
             continue
 
-        print(
-            f"[INFO] Using {len(exp_ca_for_align_df)} CAs from exp and {len(pred_ca_for_align_df)} CAs from pred for CEalign input.")
+        n_exp_ca_total = len(exp_ca_for_align_df)
+        n_pred_ca_total = len(pred_ca_for_align_df)
+        print(f"[INFO] CEalign input: {n_exp_ca_total} exp CAs, {n_pred_ca_total} pred CAs")
 
         # =========================
         # STEP 4: Two-pass CEalign with inlier filtering
@@ -391,7 +386,7 @@ def calculate_binding_pocket_rmsd_for_pairs(mapping_dict, exp_processor, pred_pr
             exp_ca_coords_for_cealign = exp_ca_for_align_df[['x', 'y', 'z']].astype(float).values
             pred_ca_coords_for_cealign = pred_ca_for_align_df[['x', 'y', 'z']].astype(float).values
 
-            INLIER_THRESH = 5.0  # Å, residual cutoff for inliers
+            INLIER_THRESH = 5  # Å, residual cutoff for inliers
 
             # Pass 1: CEalign on all CAs
             R1, t1, alignment_path_indices_1, overall_ca_rmsd_1 = get_structure_alignment(
@@ -439,7 +434,8 @@ def calculate_binding_pocket_rmsd_for_pairs(mapping_dict, exp_processor, pred_pr
                             exp_coords_filt, pred_coords_filt,
                             window_size=8, max_gap=30
                         )
-                        print(f"[INFO] Pass-2 CA RMSD: {overall_ca_rmsd_2:.3f} Å on {len(exp_coords_filt)} inliers")
+                        n_pass1_aligned = len(exp_idx_1)
+                        print(f"[INFO] Pass-2 CA RMSD: {overall_ca_rmsd_2:.3f} Å on {len(exp_coords_filt)}/{n_pass1_aligned} aligned CAs")
 
                         # Map pass-2 path back to original indices
                         if alignment_path_indices_2 and len(alignment_path_indices_2) == 2 and \
@@ -607,7 +603,9 @@ def calculate_binding_pocket_rmsd_for_pairs(mapping_dict, exp_processor, pred_pr
         else:
             print(
                 f"[WARNING] Could not compute retinal RMSD for {exp_id} due to empty coordinate arrays for retinal.")
-        print(f"[INFO] Retinal RMSD: {retinal_rmsd:.3f}Å")
+        n_exp_ret = exp_ret_coords.shape[0]
+        n_pred_ret = pred_ret_coords_original_untransformed.shape[0] if pred_ret_coords_original_untransformed.shape[0] > 0 else 0
+        print(f"[INFO] Retinal RMSD: {retinal_rmsd:.3f} Å (backbone-aligned, nearest-neighbor matched, {n_pred_ret} pred → {n_exp_ret} exp atoms)")
 
         #############################################################
         # STEP 7: Store all results
