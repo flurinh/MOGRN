@@ -312,6 +312,24 @@ def calculate_structure_errors(data_dict, output_dir='outputs', visualize=True):
         # Create RMSD table
         mo_exp_errors_df = make_rmsd_table(binding_results_mo_exp)
         mo_exp_errors_df = mo_exp_errors_df[mo_exp_errors_df['retinal_rmsd'] < 5]  # Filter out high RMSD values
+
+        # Add dataset_split column (A = benchmark set, B = blind test set)
+        datasets = data_dict.get('datasets', {})
+        mo_exp_a_ids = set(datasets.get('mo_exp_A', []))
+        mo_exp_b_ids = set(datasets.get('mo_exp_B', []))
+
+        def get_dataset_split(protein_id):
+            if protein_id in mo_exp_a_ids:
+                return 'A'
+            elif protein_id in mo_exp_b_ids:
+                return 'B'
+            else:
+                return 'Unknown'
+
+        mo_exp_errors_df['dataset_split'] = mo_exp_errors_df['protein'].apply(get_dataset_split)
+        print(f"Dataset split: {(mo_exp_errors_df['dataset_split'] == 'A').sum()} in A (benchmark), "
+              f"{(mo_exp_errors_df['dataset_split'] == 'B').sum()} in B (blind test)")
+
         mo_exp_errors_df.to_csv(os.path.join(output_dir, 'mo_exp_errors.csv'))
         print(f"MO errors saved to {os.path.join(output_dir, 'mo_exp_errors.csv')}")
     else:

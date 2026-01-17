@@ -229,19 +229,28 @@ def load_opsin_property_data(property_file, processed_structures):
             pdb_id = None
             short_name = None
             
+            # Check both lowercase and uppercase column names for PDB ID
             if 'pdb_id' in row_dict and pd.notna(row_dict['pdb_id']):
-                pdb_id = str(row_dict['pdb_id']).strip()
-            
+                pdb_id = str(row_dict['pdb_id']).strip().lower()
+                # Fix Excel scientific notation corruption (1.00E+12 -> 1e12)
+                if pdb_id.upper() in ['1.00E+12', '1E+12']:
+                    pdb_id = '1e12'
+            elif 'PDB ID' in row_dict and pd.notna(row_dict['PDB ID']):
+                pdb_id = str(row_dict['PDB ID']).strip().lower()
+                # Fix Excel scientific notation corruption (1.00E+12 -> 1e12)
+                if pdb_id.upper() in ['1.00E+12', '1E+12']:
+                    pdb_id = '1e12'
+
             if 'short_name' in row_dict and pd.notna(row_dict['short_name']):
                 short_name = str(row_dict['short_name']).strip()
-                # Clean short_name for predicted structure and append _smile_model_0
-                predicted_id = clean_structure_name(short_name)
-                # ALWAYS append _smile_model_0 to predicted IDs for consistent naming
-                predicted_id_with_suffix = f"{predicted_id}_smile_model_0"
+                # Clean short_name for predicted structure and append _model_0
+                predicted_id = clean_structure_name(short_name).lower()
+                # ALWAYS append _model_0 to predicted IDs for consistent naming
+                predicted_id_with_suffix = f"{predicted_id}_model_0"
             
             # Create mapping if both pdb_id and short_name exist
             if pdb_id and short_name:
-                # Map pdb_id to predicted_id_with_suffix (short_name with _smile_model_0 suffix)
+                # Map pdb_id to predicted_id_with_suffix (short_name with _model_0 suffix)
                 structure_mapping[pdb_id] = predicted_id_with_suffix
                 
                 # Add properties for both the pdb_id and the predicted_id_with_suffix
@@ -268,9 +277,9 @@ def load_opsin_property_data(property_file, processed_structures):
                 processed_structures[pdb_id]['properties'].update(property_data)
             
             elif short_name:
-                # Always use the name with _smile_model_0 suffix for predicted structures
-                predicted_id = clean_structure_name(short_name)
-                predicted_id_with_suffix = f"{predicted_id}_smile_model_0"
+                # Always use the name with _model_0 suffix for predicted structures
+                predicted_id = clean_structure_name(short_name).lower()
+                predicted_id_with_suffix = f"{predicted_id}_model_0"
                 
                 properties[predicted_id_with_suffix] = property_data.copy()
                 
@@ -279,22 +288,26 @@ def load_opsin_property_data(property_file, processed_structures):
                         processed_structures[predicted_id_with_suffix]['properties'] = {}
                     processed_structures[predicted_id_with_suffix]['properties'].update(property_data)
         
+        # Add properties for Hideaki structures with _J###_refine# pattern
+        # These map to the base name's properties (e.g., breaches_j215_refine6 -> breaches_model_0)
+        import re
+        hideaki_pattern = re.compile(r'^(.+)_j\d+_refine\d+$', re.IGNORECASE)
+
+        for struct_id in list(processed_structures.keys()) if processed_structures else []:
+            match = hideaki_pattern.match(struct_id)
+            if match:
+                base_name = match.group(1).lower()
+                # Try to find properties from base_name_model_0
+                model_id = f"{base_name}_model_0"
+                if model_id in properties:
+                    properties[struct_id] = properties[model_id].copy()
+
         # Filter mapping to include only pairs where both keys and values are in processed_structures
         filtered_mapping = {}
         for exp_id, pred_id in structure_mapping.items():
-            if exp_id in processed_structures and (
-                pred_id in processed_structures or 
-                # Also check for the predicted ID with other common suffixes
-                pred_id.replace("_smile_model_0", "_model_0") in processed_structures
-            ):
-                # If the exact suffix isn't found but a variant is, use the variant
-                if pred_id not in processed_structures:
-                    variant = pred_id.replace("_smile_model_0", "_model_0")
-                    if variant in processed_structures:
-                        filtered_mapping[exp_id] = variant
-                else:
-                    filtered_mapping[exp_id] = pred_id
-        
+            if exp_id in processed_structures and pred_id in processed_structures:
+                filtered_mapping[exp_id] = pred_id
+
         print(f"Added properties for {len(properties)} structures")
         print(f"Created {len(filtered_mapping)} experimental-predicted structure mappings")
         

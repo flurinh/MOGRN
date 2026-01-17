@@ -23,6 +23,21 @@ from src.data_processing import load_experimental_dataset
 from src.opsin_color_scheme import HELIX_NUMBER_COLORS, get_categorical_colors
 
 
+# Compatibility class for pickle loading
+class DatasetCompat:
+    """Compatibility class for loading pickled data created by opsin_analysis_workflow."""
+    def __init__(self, pdb_ids, data=None):
+        self.pdb_ids = list(pdb_ids)
+        self.data = data if data is not None else pd.DataFrame()
+
+    def format_data_types(self):
+        if self.data.empty:
+            return
+        for col in ['x', 'y', 'z']:
+            if col in self.data.columns:
+                self.data[col] = pd.to_numeric(self.data[col], errors='coerce')
+
+
 # Basic 3-letter to 1-letter amino acid mapping for hover text enrichment
 THREE_TO_ONE_AA = {
     "ALA": "A", "ARG": "R", "ASN": "N", "ASP": "D", "CYS": "C",
@@ -122,7 +137,9 @@ def load_grn_table(grn_file="opsin_output/curated_grn_postprocessed.csv"):
     grn_path = Path(grn_file)
 
     print(f"Reading GRN table from: {grn_path}")
-    grn_df = pd.read_csv(grn_path, index_col=0)
+    # Use dtype={0: str} to prevent scientific notation parsing (e.g., "1e12" -> 1000000000000)
+    grn_df = pd.read_csv(grn_path, index_col=0, dtype={0: str})
+    grn_df.index = grn_df.index.astype(str)
 
     print(f"GRN table: {len(grn_df)} structures, {len(grn_df.columns)} GRN positions")
     return grn_df
@@ -965,16 +982,20 @@ def create_interactive_opsin_visualization(
 ):
     """Legacy interactive visualization used for interactive_grn_alignment.html."""
 
-    # Find overall center of all coordinates for rotation-friendly centering
+    # Determine which structures will be visualized (limited by max_structures)
+    visualized_struct_ids = list(aligned_structures.keys())[:max_structures]
+
+    # Find overall center of CA coordinates for ONLY the visualized structures
     all_coords = []
-    for struct_id, data in aligned_structures.items():
+    for struct_id in visualized_struct_ids:
+        data = aligned_structures[struct_id]
         if 'coords' in data:
             all_coords.extend(data['coords'])
 
     if all_coords:
         all_coords = np.array(all_coords)
         overall_center = np.mean(all_coords, axis=0)
-        print(f"Centering visualization on overall center: {overall_center}")
+        print(f"Centering visualization on CA center of {len(visualized_struct_ids)} structures: {overall_center}")
     else:
         overall_center = np.array([0.0, 0.0, 0.0])
 
@@ -989,11 +1010,8 @@ def create_interactive_opsin_visualization(
             df[['x', 'y', 'z']] = df[['x', 'y', 'z']].values - overall_center
 
     existing_grns = set()
-    structure_count = 0
-    for struct_id, data in aligned_structures.items():
-        if structure_count > max_structures:
-            break
-
+    for struct_id in visualized_struct_ids:
+        data = aligned_structures[struct_id]
         df = data.get('dataframe')
         if df is not None:
             structure_grns = df['grn'].dropna().unique()
@@ -1001,8 +1019,6 @@ def create_interactive_opsin_visualization(
         else:
             grn_positions = data.get('grn_positions', data.get('grn', []))
             existing_grns.update([grn for grn in grn_positions if pd.notna(grn)])
-
-        structure_count += 1
 
     # Filter to helix GRNs (1-7) from the table that exist in at least one structure
     def is_helix_grn(grn):
@@ -1494,7 +1510,7 @@ def create_interactive_opsin_visualization(
     # Calculate where highlight traces start
     highlight_start_idx = base_trace_count
 
-    def create_visibility_array(grn_index, color_mode='helix'):
+    def create_visibility_array(grn_index, color_mode='helix', show_grn=True):
         # Build visibility array matching exact order in fig.data
         visibility = [False] * total_traces
 
@@ -1510,24 +1526,26 @@ def create_interactive_opsin_visualization(
         if membrane_trace_count > 0:
             visibility[-1] = True
 
-        # Set highlight trace visibility
+        # Set highlight trace visibility - only if show_grn is True
         # Helix highlights are at indices: base_trace_count to base_trace_count + len(all_grn_positions) - 1
         # Property highlights are at indices: base_trace_count + len(all_grn_positions) to base_trace_count + 2*len(all_grn_positions) - 1
-        if color_mode == 'helix':
-            helix_highlight_idx = highlight_start_idx + grn_index
-            if helix_highlight_idx < total_traces:
-                visibility[helix_highlight_idx] = True
-        else:
-            property_highlight_idx = highlight_start_idx + len(all_grn_positions) + grn_index
-            if property_highlight_idx < total_traces:
-                visibility[property_highlight_idx] = True
+        if show_grn:
+            if color_mode == 'helix':
+                helix_highlight_idx = highlight_start_idx + grn_index
+                if helix_highlight_idx < total_traces:
+                    visibility[helix_highlight_idx] = True
+            else:
+                property_highlight_idx = highlight_start_idx + len(all_grn_positions) + grn_index
+                if property_highlight_idx < total_traces:
+                    visibility[property_highlight_idx] = True
 
-        # Set table trace visibility
+        # Set table trace visibility - only if show_grn is True
         # Table traces are at indices: base_trace_count + 2*len(all_grn_positions) to base_trace_count + 3*len(all_grn_positions) - 1
-        table_start_idx = highlight_start_idx + 2 * len(all_grn_positions)
-        table_idx = table_start_idx + grn_index
-        if table_idx < total_traces:
-            visibility[table_idx] = True
+        if show_grn:
+            table_start_idx = highlight_start_idx + 2 * len(all_grn_positions)
+            table_idx = table_start_idx + grn_index
+            if table_idx < total_traces:
+                visibility[table_idx] = True
 
         return visibility
 
@@ -1577,6 +1595,49 @@ def create_interactive_opsin_visualization(
             yanchor="bottom"
         ))
 
+    # Add GRN toggle buttons (Show/Hide GRN highlights)
+    grn_toggle_buttons = [
+        dict(
+            label="Show GRN",
+            method="update",
+            args=[
+                {"visible": create_visibility_array(0, 'helix', show_grn=True)},
+                {"sliders": [dict(
+                    active=0,
+                    currentvalue={"prefix": "GRN Position: "},
+                    pad={"t": 50},
+                    steps=helix_steps,
+                    visible=True
+                )]}
+            ]
+        ),
+        dict(
+            label="Hide GRN",
+            method="update",
+            args=[
+                {"visible": create_visibility_array(0, 'helix', show_grn=False)},
+                {"sliders": [dict(
+                    active=0,
+                    currentvalue={"prefix": "GRN Position: "},
+                    pad={"t": 50},
+                    steps=helix_steps,
+                    visible=False
+                )]}
+            ]
+        )
+    ]
+    updatemenus.append(dict(
+        type="buttons",
+        direction="left",
+        buttons=grn_toggle_buttons,
+        pad={"r": 10, "t": 10},
+        showactive=True,
+        x=0.30,  # Position to the right of color mode buttons
+        xanchor="left",
+        y=0.02,
+        yanchor="bottom"
+    ))
+
     layout_args = dict(
         title=f'{title} (n={structure_count})',
         paper_bgcolor='white',
@@ -1607,8 +1668,7 @@ def create_interactive_opsin_visualization(
         yaxis=dict(visible=False, showbackground=False, showgrid=False, showline=False, showticklabels=False, title=""),
         zaxis=dict(visible=False, showbackground=False, showgrid=False, showline=False, showticklabels=False, title=""),
         camera=dict(eye=dict(x=1.8, y=1.8, z=0.8), center=dict(x=0, y=0, z=0), up=dict(x=0, y=0, z=1)),
-        aspectmode='data',
-        aspectratio=dict(x=1, y=1, z=1),
+        aspectmode='cube',  # Force 1:1:1 aspect ratio
         bgcolor='white'
     )
 
@@ -1761,7 +1821,7 @@ def create_interactive_opsin_visualization_extended(
                     y=bond_y,
                     z=bond_z,
                     mode='lines',
-                    line=dict(color='#FF7F0E', width=4),
+                    line=dict(color='#404040', width=4),  # Dark grey
                     name=f'{struct_id} RET bonds',
                     legendgroup='RET',
                     showlegend=True,
@@ -1775,7 +1835,7 @@ def create_interactive_opsin_visualization_extended(
                 y=coords[:, 1],
                 z=coords[:, 2],
                 mode='markers',
-                marker=dict(size=6, color='#FDB863', line=dict(color='#FF7F0E', width=1.5)),
+                marker=dict(size=6, color='#606060', line=dict(color='#404040', width=1.5)),  # Dark grey
                 name=f'{struct_id} RET atoms',
                 legendgroup='RET',
                 showlegend=not bool(traces),
@@ -1792,16 +1852,20 @@ def create_interactive_opsin_visualization_extended(
 
         return traces
 
-    # Find overall center of all coordinates for rotation-friendly centering
+    # Determine which structures will be visualized (limited by max_structures)
+    visualized_struct_ids = list(aligned_structures.keys())[:max_structures]
+
+    # Find overall center of CA coordinates for ONLY the visualized structures
     all_coords = []
-    for struct_id, data in aligned_structures.items():
+    for struct_id in visualized_struct_ids:
+        data = aligned_structures[struct_id]
         if 'coords' in data:
             all_coords.extend(data['coords'])
 
     if all_coords:
         all_coords = np.array(all_coords)
         overall_center = np.mean(all_coords, axis=0)
-        print(f"Centering visualization on overall center: {overall_center}")
+        print(f"Centering visualization on CA center of {len(visualized_struct_ids)} structures: {overall_center}")
     else:
         overall_center = np.array([0.0, 0.0, 0.0])
 
@@ -1815,13 +1879,10 @@ def create_interactive_opsin_visualization_extended(
             df = data['dataframe']
             df[['x', 'y', 'z']] = df[['x', 'y', 'z']].values - overall_center
 
-    # First, collect all GRN positions that actually exist in the structures
+    # Collect all GRN positions that actually exist in the visualized structures
     existing_grns = set()
-    structure_count = 0
-    for struct_id, data in aligned_structures.items():
-        if structure_count > max_structures:  # Use parameter instead of hardcoded value
-            break
-
+    for struct_id in visualized_struct_ids:
+        data = aligned_structures[struct_id]
         df = data.get('dataframe')
         if df is not None:
             # Get all non-null GRN values from this structure
@@ -1832,8 +1893,6 @@ def create_interactive_opsin_visualization_extended(
             grn_positions = data.get('grn_positions', data.get('grn', []))
             structure_grns = [grn for grn in grn_positions if pd.notna(grn)]
             existing_grns.update(structure_grns)
-
-        structure_count += 1
 
     # Filter to helix GRNs (1-7) from the table that exist in at least one structure
     def is_helix_grn(grn):
@@ -2511,7 +2570,7 @@ def create_interactive_opsin_visualization_extended(
     # 2. Color mode toggle (helix vs property)
 
     # Helper function to create visibility array for a given state
-    def create_visibility_array(grn_index, color_mode='helix'):
+    def create_visibility_array(grn_index, color_mode='helix', show_grn=True):
         visibility = []
 
         # Base structure traces (helix vs property)
@@ -2532,11 +2591,12 @@ def create_interactive_opsin_visualization_extended(
         # Membrane trace (always visible)
         visibility.extend([True] * membrane_trace_count)
 
-        # Highlight traces (helix vs property)
+        # Highlight traces (helix vs property) - only show if show_grn is True
         if color_mode == 'helix':
             # Show helix highlights, hide property highlights
             visibility.extend([False] * len(all_grn_positions))  # All helix highlights hidden
-            visibility[total_base_traces + grn_index] = True  # Only current helix highlight visible
+            if show_grn:
+                visibility[total_base_traces + grn_index] = True  # Only current helix highlight visible
             if property_data:
                 visibility.extend([False] * len(all_grn_positions))  # All property highlights hidden
         else:  # property mode
@@ -2544,12 +2604,14 @@ def create_interactive_opsin_visualization_extended(
             visibility.extend([False] * len(all_grn_positions))  # All helix highlights hidden
             if property_data:
                 visibility.extend([False] * len(all_grn_positions))  # All property highlights hidden
-                visibility[total_base_traces + len(all_grn_positions) + grn_index] = True  # Only current property highlight visible
+                if show_grn:
+                    visibility[total_base_traces + len(all_grn_positions) + grn_index] = True  # Only current property highlight visible
 
-        # Table traces (same for both modes)
+        # Table traces (same for both modes) - only show if show_grn is True
         table_start_idx = len(visibility)
         visibility.extend([False] * len(all_grn_positions))  # All table traces hidden
-        visibility[table_start_idx + grn_index] = True  # Only current table visible
+        if show_grn:
+            visibility[table_start_idx + grn_index] = True  # Only current table visible
 
         return visibility
 
@@ -2632,6 +2694,49 @@ def create_interactive_opsin_visualization_extended(
             yanchor="bottom"
         ))
 
+    # Add GRN toggle buttons (Show/Hide GRN highlights)
+    grn_toggle_buttons = [
+        dict(
+            label="Show GRN",
+            method="update",
+            args=[
+                {"visible": create_visibility_array(0, 'helix', show_grn=True)},
+                {"sliders": [dict(
+                    active=0,
+                    currentvalue={"prefix": "GRN Position: "},
+                    pad={"t": 50},
+                    steps=helix_steps,
+                    visible=True
+                )]}
+            ]
+        ),
+        dict(
+            label="Hide GRN",
+            method="update",
+            args=[
+                {"visible": create_visibility_array(0, 'helix', show_grn=False)},
+                {"sliders": [dict(
+                    active=0,
+                    currentvalue={"prefix": "GRN Position: "},
+                    pad={"t": 50},
+                    steps=helix_steps,
+                    visible=False
+                )]}
+            ]
+        )
+    ]
+    updatemenus.append(dict(
+        type="buttons",
+        direction="left",
+        buttons=grn_toggle_buttons,
+        pad={"r": 10, "t": 10},
+        showactive=True,
+        x=0.30,  # Position to the right of color mode buttons
+        xanchor="left",
+        y=0.02,
+        yanchor="bottom"
+    ))
+
     # Update layout for clean visualization with subplots
     layout_args = dict(
         title=f'{title} (n={structure_count})',
@@ -2654,7 +2759,7 @@ def create_interactive_opsin_visualization_extended(
         margin=dict(l=0, r=0, t=80, b=50)  # More bottom margin for color mode buttons
     )
 
-    # Add updatemenus if we have property data
+    # Add updatemenus
     if updatemenus:
         layout_args['updatemenus'] = updatemenus
 
@@ -2693,8 +2798,7 @@ def create_interactive_opsin_visualization_extended(
             center=dict(x=0, y=0, z=0),     # Look at center
             up=dict(x=0, y=0, z=1)          # Z-axis points up in the view
         ),
-        aspectmode='data',
-        aspectratio=dict(x=1, y=1, z=1),
+        aspectmode='cube',  # Force 1:1:1 aspect ratio
         # Clean white background
         bgcolor='white'
     )
@@ -2707,7 +2811,7 @@ def create_opsin_visualization_from_workflow(
     property_file="property/mo_exp_ST1.csv",
     grn_file="opsin_output/curated_grn_postprocessed.csv",
     output_file="opsin_output/interactive_grn_alignment_3d.html",
-    reference_id='6xl3',
+    reference_id='4kkh',
     **viz_kwargs
 ):
     """
@@ -2801,7 +2905,7 @@ def create_opsin_visualization_from_workflow_b(
     property_file="property/mo_exp_ST1.csv",
     grn_file="opsin_output/curated_grn_postprocessed.csv",
     output_file="opsin_output/interactive_grn_alignment_b.html",
-    reference_id='6xl3',
+    reference_id='4kkh',
     **viz_kwargs
 ):
     """Generate the enhanced interactive figure with retinal overlay and amino-acid filtering."""

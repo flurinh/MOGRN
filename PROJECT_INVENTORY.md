@@ -72,11 +72,12 @@ This document provides an exhaustive inventory of all scripts and their function
 **Status**: CORE
 
 ### `src/helix_analysis.py`
-**Purpose**: Helix identification and annotation
+**Purpose**: Load and apply helix definitions from helices_grn.json
 **Functions**:
-- `define_reference_helices()`: Load helix boundaries from JSON
-- `align_to_reference_and_annotate_helices()`: Propagate helix annotations
-- `annotate_helices_from_reference()`: Apply helix labels
+- `load_helix_definitions()`: Load helix boundaries from property/helices_grn.json
+- `apply_helix_annotations()`: Apply helix annotations to processed structures
+- `load_and_apply_helix_annotations()`: Main entry point for workflow
+**Note**: Helix definitions come from `scripts/generate_helices_grn.py` based on the postprocessed GRN table
 **Status**: CORE
 
 ### `src/assign_grns.py`

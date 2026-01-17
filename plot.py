@@ -92,6 +92,105 @@ except ImportError:
 
 
 # =============================================================================
+# GRN helix filtering (uses positions with sufficient coverage)
+# =============================================================================
+
+# Minimum number of structures required for a GRN position to be included
+MIN_GRN_COVERAGE = 20
+
+# Cache for GRN table columns with sufficient coverage
+_GRN_TABLE_COLUMNS = None
+
+
+def get_grn_table_helix_columns() -> set:
+    """
+    Load helix columns (1.xx - 7.xx) from the curated GRN table
+    that have at least MIN_GRN_COVERAGE structures with valid assignments.
+
+    Returns:
+        Set of GRN column names that are helix positions with sufficient coverage
+    """
+    global _GRN_TABLE_COLUMNS
+    if _GRN_TABLE_COLUMNS is not None:
+        return _GRN_TABLE_COLUMNS
+
+    grn_file = OUTPUT_DIR / "curated_grn_postprocessed.csv"
+    if not grn_file.exists():
+        print(f"[WARN] GRN table not found: {grn_file}")
+        _GRN_TABLE_COLUMNS = set()
+        return _GRN_TABLE_COLUMNS
+
+    try:
+        df = pd.read_csv(grn_file, index_col=0, dtype={0: str})
+        df.index = df.index.astype(str)
+
+        helix_cols = set()
+        for col in df.columns:
+            try:
+                parts = col.split('.')
+                if len(parts) == 2:
+                    helix = int(parts[0])
+                    if 1 <= helix <= 7:  # Only helices 1-7
+                        # Count non-null, non-gap values
+                        valid_count = df[col].apply(
+                            lambda x: pd.notna(x) and str(x).strip() != '-'
+                        ).sum()
+                        if valid_count >= MIN_GRN_COVERAGE:
+                            helix_cols.add(col)
+            except (ValueError, IndexError):
+                continue
+
+        _GRN_TABLE_COLUMNS = helix_cols
+        print(f"[INFO] Loaded {len(helix_cols)} helix columns with >= {MIN_GRN_COVERAGE} structures")
+    except Exception as e:
+        print(f"[WARN] Failed to load GRN table columns: {e}")
+        _GRN_TABLE_COLUMNS = set()
+
+    return _GRN_TABLE_COLUMNS
+
+
+def filter_grns_by_helix_ranges(grn_list: list) -> list:
+    """
+    Filter GRN positions to only include helix positions (1.xx - 7.xx)
+    that have sufficient coverage in the curated GRN table.
+
+    Args:
+        grn_list: List of GRN strings (e.g., ['1.39', '1.40', '2.45', ...])
+
+    Returns:
+        Filtered list of GRN strings that are helix positions with sufficient coverage
+    """
+    grn_table_cols = get_grn_table_helix_columns()
+
+    # If we couldn't load the GRN table, fall back to simple helix filter
+    if not grn_table_cols:
+        return [g for g in grn_list if '.' in g and g.split('.')[0].isdigit()
+                and 1 <= int(g.split('.')[0]) <= 7]
+
+    # Filter to only include columns with sufficient coverage
+    return [g for g in grn_list if g in grn_table_cols]
+
+
+# =============================================================================
+# Compatibility class for pickle loading
+# =============================================================================
+
+class DatasetCompat:
+    """Compatibility class for loading pickled data created by opsin_analysis_workflow."""
+    def __init__(self, pdb_ids, data=None):
+        self.pdb_ids = list(pdb_ids)
+        self.data = data if data is not None else pd.DataFrame()
+
+    def format_data_types(self):
+        """Format data types for compatibility with legacy code."""
+        if self.data.empty:
+            return
+        for col in ['x', 'y', 'z']:
+            if col in self.data.columns:
+                self.data[col] = pd.to_numeric(self.data[col], errors='coerce')
+
+
+# =============================================================================
 # Data Loading Functions
 # =============================================================================
 
@@ -528,19 +627,34 @@ def main(args=None):
     if args.only is None or args.only == "overview":
         print("\n[VIZ 1] Opsin Overview Plot...")
         try:
+            # Get structure mapping to identify which predicted structures have experimental counterparts
+            structure_mapping = data.get("structure_mapping", {})
+            # Reverse mapping: pred_id -> exp_id
+            pred_to_exp = {v: k for k, v in structure_mapping.items()}
+
             overview_list = []
+            # Only include predicted/modelled structures (those with "_model_0")
             for sid in processed_structures:
-                props = get_structure_props(sid)
                 is_pred = "_model_0" in sid or "_pred" in sid
+                if not is_pred:
+                    continue  # Skip experimental structures
+
+                props = get_structure_props(sid)
+                # Check if this predicted structure has an experimental counterpart
+                has_experimental = sid in pred_to_exp
+
                 overview_list.append({
                     "id": sid,
                     "short_name": sid.replace("_model_0", ""),
                     "molecular_function": props.get("molecular_function", "Unknown"),
                     "domain": props.get("domain", "Unknown"),
-                    "experimentally_determined": not is_pred,
+                    "experimentally_determined": has_experimental,
                 })
 
             overview_df = pd.DataFrame(overview_list)
+            print(f"[INFO] Overview: {len(overview_df)} modelled structures, "
+                  f"{overview_df['experimentally_determined'].sum()} with experimental counterparts")
+
             if not overview_df.empty:
                 fig = create_opsin_overview_plot(overview_df)
                 fig_path = output_dir / "01_opsin_overview.png"
@@ -580,7 +694,7 @@ def main(args=None):
                     fig, summary = plot_error_box_comparison(
                         df_a, df_b,
                         metrics=["backbone_rmsd", "pocket_rmsd", "retinal_rmsd"],
-                        dataset_labels=("Benchmark set", "Blind test set"),
+                        dataset_labels=("Benchmark set A", "Blind set B"),
                         output_path=fig_path,
                     )
                     plt.close(fig)
@@ -673,8 +787,23 @@ def main(args=None):
     if args.only is None or args.only == "distance":
         print("\n[VIZ 4-5] Distance Plots...")
 
-        distance_table = data.get("distance_table")
-        ca_distance_table = data.get("ca_distance_table")
+        # Load distance tables from GRN-based analysis (preferred)
+        distance_grn_path = input_dir / "distance_table_grn.csv"
+        ca_distance_grn_path = input_dir / "ca_distance_table_grn.csv"
+
+        if distance_grn_path.exists():
+            print(f"[INFO] Loading GRN-based distance table: {distance_grn_path}")
+            distance_table = pd.read_csv(distance_grn_path, index_col=0, dtype={0: str})
+            distance_table.index = distance_table.index.astype(str)
+        else:
+            distance_table = data.get("distance_table")
+
+        if ca_distance_grn_path.exists():
+            print(f"[INFO] Loading GRN-based CA distance table: {ca_distance_grn_path}")
+            ca_distance_table = pd.read_csv(ca_distance_grn_path, index_col=0, dtype={0: str})
+            ca_distance_table.index = ca_distance_table.index.astype(str)
+        else:
+            ca_distance_table = data.get("ca_distance_table")
 
         # Load residue table for filtering
         residue_table = data.get("msa_df")
@@ -685,7 +814,8 @@ def main(args=None):
         if residue_table is None or (isinstance(residue_table, pd.DataFrame) and residue_table.empty):
             curated_grn_path = input_dir / "curated_grn_postprocessed.csv"
             if curated_grn_path.exists():
-                residue_table = pd.read_csv(curated_grn_path, index_col=0)
+                residue_table = pd.read_csv(curated_grn_path, index_col=0, dtype={0: str})
+                residue_table.index = residue_table.index.astype(str)
 
         # Filter by 7.50 position (Lysine required for retinal binding)
         df_filtered = pd.DataFrame()
@@ -710,7 +840,7 @@ def main(args=None):
                 else:
                     plot_table = distance_table
 
-                grns = get_tm_residues(sort_grns_str(plot_table.columns.astype(str).tolist()))
+                grns = filter_grns_by_helix_ranges(sort_grns_str(plot_table.columns.astype(str).tolist()))
 
                 fig = plot_distances_with_std(
                     plot_table[grns] if grns else plot_table,
@@ -735,8 +865,10 @@ def main(args=None):
                 else:
                     plot_table = ca_distance_table
 
+                grns = filter_grns_by_helix_ranges(sort_grns_str(plot_table.columns.astype(str).tolist()))
+
                 fig = plot_distances_with_std(
-                    plot_table,
+                    plot_table[grns] if grns else plot_table,
                     title="CA-Atom Distance to Retinal",
                     use_ca=True,
                     figsize=(14, 8),
@@ -763,7 +895,8 @@ def main(args=None):
         if residue_table is None or (isinstance(residue_table, pd.DataFrame) and residue_table.empty):
             curated_grn_path = input_dir / "curated_grn_postprocessed.csv"
             if curated_grn_path.exists():
-                residue_table = pd.read_csv(curated_grn_path, index_col=0)
+                residue_table = pd.read_csv(curated_grn_path, index_col=0, dtype={0: str})
+                residue_table.index = residue_table.index.astype(str)
 
         if isinstance(residue_table, pd.DataFrame) and not residue_table.empty:
             # Filter for K at 7.50
@@ -821,6 +954,7 @@ def main(args=None):
                 max_structures=150,
                 show_membrane=True,
                 membrane_opacity=0.05,
+                reference_id='4kkh'
             )
             if fig:
                 print(f"[OK] Saved: {interactive_path}")
@@ -834,6 +968,7 @@ def main(args=None):
                 max_structures=150,
                 show_membrane=True,
                 membrane_opacity=0.05,
+                reference_id='4kkh'
             )
             if fig_b:
                 print(f"[OK] Saved: {interactive_path_b}")

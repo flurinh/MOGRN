@@ -149,14 +149,25 @@ def compute_all_vs_all_rmsd_improved(structures, align_to=None, subset='CA', cha
                         # Use helix-annotated residues
 
                         # Filter for residues with helix_num 1-7
-                        struct1_helices = struct1_df[struct1_df['helix_num']>0]
-                        struct2_helices = struct2_df[struct2_df['helix_num']>0]
+                        struct1_helices = struct1_df[struct1_df['helix_num'] > 0]
+                        struct2_helices = struct2_df[struct2_df['helix_num'] > 0]
 
                         # Check if we found any helix residues
                         if len(struct1_helices) > 0 and len(struct2_helices) > 0:
-                            struct1_df = struct1_helices
-                            struct2_df = struct2_helices
-                            # Successfully filtered for helix residues
+                            # Find common helices between both structures
+                            # (handles cases like VbACR2 which only has H2-H7)
+                            helices1 = set(struct1_helices['helix_num'].unique())
+                            helices2 = set(struct2_helices['helix_num'].unique())
+                            common_helices = helices1 & helices2
+
+                            if common_helices:
+                                # Filter both structures to only include common helices
+                                struct1_df = struct1_helices[struct1_helices['helix_num'].isin(common_helices)]
+                                struct2_df = struct2_helices[struct2_helices['helix_num'].isin(common_helices)]
+                            else:
+                                print(f"[WARNING] No common helices between {struct1_id} and {struct2_id}. Using all helix residues.")
+                                struct1_df = struct1_helices
+                                struct2_df = struct2_helices
                         else:
                             print(f"[WARNING] No TM helix residues (1-7) found for {struct1_id} or {struct2_id}. Using all protein residues instead.")
 
@@ -227,7 +238,7 @@ def compute_all_vs_all_rmsd_improved(structures, align_to=None, subset='CA', cha
                     rmsd_matrix[i, j] = np.nan
                     rmsd_matrix[j, i] = np.nan
 
-            pbar.update(1)
+                pbar.update(1)
 
     # Close the progress bar
     pbar.close()
@@ -386,7 +397,7 @@ def calculate_binding_pocket_rmsd_for_pairs(mapping_dict, exp_processor, pred_pr
             exp_ca_coords_for_cealign = exp_ca_for_align_df[['x', 'y', 'z']].astype(float).values
             pred_ca_coords_for_cealign = pred_ca_for_align_df[['x', 'y', 'z']].astype(float).values
 
-            INLIER_THRESH = 5  # Å, residual cutoff for inliers
+            INLIER_THRESH = 3  # Å, residual cutoff for inliers (2-band filter)
 
             # Pass 1: CEalign on all CAs
             R1, t1, alignment_path_indices_1, overall_ca_rmsd_1 = get_structure_alignment(
@@ -970,7 +981,6 @@ def compare_structures(data_dict, output_dir='outputs', visualize=True):
             struct_data = processed_structures_complete[pdb_id]
             # Use property data from the loaded structure data
             if 'properties' in struct_data:
-                print("available structure properties:", struct_data['properties'].keys())
                 # First try to use molecular_function as the group type
                 if 'molecular_function' in struct_data['properties'] and struct_data['properties'][
                     'molecular_function'] != 'Unknown':

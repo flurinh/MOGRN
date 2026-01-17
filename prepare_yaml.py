@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 from ruamel.yaml import YAML
 
 # Load the dataset
-df = pd.read_excel('property/mo_exp.xlsx', index_col=0)
+df = pd.read_excel('property/mo_exp_ST1.csv', index_col=0)
 
 # Clean sequences by removing spaces
 df['seq'] = df['seq'].str.replace(' ', '')

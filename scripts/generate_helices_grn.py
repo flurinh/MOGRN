@@ -2,11 +2,18 @@
 """
 Generate helix boundaries based on GRN positions.
 
-For each helix, uses positions X.41 to X.59 (±9 from X.50) to define
-the helix boundaries in terms of residue numbers.
+For each helix, uses manually curated GRN ranges to define the helix
+boundaries in terms of residue numbers:
+  H1: 1.39 - 1.56
+  H2: 2.45 - 2.66
+  H3: 3.41 - 3.58
+  H4: 4.40 - 4.58
+  H5: 5.43 - 5.60
+  H6: 6.40 - 6.57
+  H7: 7.38 - 7.58
 
 This is the inverse of helix extension - instead of extending based on
-structure, we define helix ranges based on a fixed GRN window.
+structure, we define helix ranges based on GRN alignment.
 
 Output: property/helices_grn.json
 """
@@ -18,9 +25,16 @@ import pandas as pd
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
-# GRN range for each helix: X.41 to X.59 (±9 from X.50)
-HELIX_GRN_START = 41
-HELIX_GRN_END = 59
+# GRN ranges for each helix (manually curated)
+HELIX_GRN_RANGES = {
+    1: (39, 56),
+    2: (45, 61),
+    3: (41, 58),
+    4: (40, 58),
+    5: (43, 60),
+    6: (40, 57),
+    7: (38, 58),
+}
 
 
 def extract_residue_number(value: str) -> int | None:
@@ -46,15 +60,14 @@ def get_helix_range(row: pd.Series, helix_num: int, columns: list) -> tuple[int,
     Returns:
         Tuple of (start_residue, end_residue) or None if not found
     """
-    start_col = f"{helix_num}.{HELIX_GRN_START}"
-    end_col = f"{helix_num}.{HELIX_GRN_END}"
+    grn_start, grn_end = HELIX_GRN_RANGES[helix_num]
 
     start_res = None
     end_res = None
 
     # Find the first assigned residue in the range (for start)
-    for pos in range(HELIX_GRN_START, HELIX_GRN_END + 1):
-        col = f"{helix_num}.{pos}"
+    for pos in range(grn_start, grn_end + 1):
+        col = f"{helix_num}.{pos:02d}"
         if col in columns:
             res_num = extract_residue_number(row[col])
             if res_num is not None:
@@ -62,8 +75,8 @@ def get_helix_range(row: pd.Series, helix_num: int, columns: list) -> tuple[int,
                 break
 
     # Find the last assigned residue in the range (for end)
-    for pos in range(HELIX_GRN_END, HELIX_GRN_START - 1, -1):
-        col = f"{helix_num}.{pos}"
+    for pos in range(grn_end, grn_start - 1, -1):
+        col = f"{helix_num}.{pos:02d}"
         if col in columns:
             res_num = extract_residue_number(row[col])
             if res_num is not None:
@@ -80,13 +93,17 @@ def main():
     print("=" * 60)
     print("GENERATING HELIX BOUNDARIES FROM GRN POSITIONS")
     print("=" * 60)
-    print(f"Using GRN range: X.{HELIX_GRN_START} to X.{HELIX_GRN_END} (±9 from X.50)")
+    print("Using manually curated GRN ranges:")
+    for h, (start, end) in HELIX_GRN_RANGES.items():
+        print(f"  H{h}: {h}.{start:02d} - {h}.{end:02d}")
 
     # Load postprocessed GRN table
     grn_file = PROJECT_ROOT / "opsin_output" / "curated_grn_postprocessed.csv"
     print(f"\n[INFO] Loading GRN table: {grn_file}")
 
-    df = pd.read_csv(grn_file, index_col=0)
+    # Read with index as string to prevent scientific notation parsing (e.g., "1e12" -> 1000000000000)
+    df = pd.read_csv(grn_file, index_col=0, dtype={0: str})
+    df.index = df.index.astype(str)
     print(f"[INFO] Loaded {len(df)} structures x {len(df.columns)} columns")
 
     columns = list(df.columns)
