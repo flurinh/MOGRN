@@ -7,16 +7,15 @@
 
 <p align="center"><img src="docs/grn-positions.jpg" alt="Key GRN microswitch positions on bacteriorhodopsin" width="380"></p>
 
-<p align="center">
-  <a href="https://flurinh.github.io/aboutme">◆ Portfolio</a> &nbsp;·&nbsp;
-  <b>The build:</b>
-  <a href="https://github.com/flurinh/LM-DTA">LM-DTA</a> →
-  <a href="https://github.com/flurinh/mt">Master thesis</a> →
-  <a href="https://github.com/flurinh/protos">ProtOS</a> →
-  <b>MOGRN</b> →
-  <a href="https://github.com/flurinh/lambda">Lambda</a> →
-  <a href="https://github.com/flurinh/Protos_MCP">ProtOS-MCP</a>
-</p>
+<p align="center"><a href="https://flurinh.github.io/aboutme">◆ Portfolio</a></p>
+
+<p align="center"><i>You may also be interested in</i></p>
+
+<table align="center"><tr>
+<td align="left">←&nbsp; <b>Previous work</b><br><a href="https://github.com/flurinh/protos">ProtOS — the framework underneath</a></td>
+<td width="56"></td>
+<td align="right"><b>Continuation of this project</b> &nbsp;→<br><a href="https://github.com/flurinh/lambda">Lambda — predicting opsin colour</a></td>
+</tr></table>
 
 ---
 
@@ -31,8 +30,12 @@ scale. It is the basis of my lead-author residue-numbering paper.
 Anchor positions (the `.50` set): **3.50** — the functional switch (T in pumps → C in
 channels); **6.50** — the conserved retinal-pocket tryptophan; **7.50** — the Schiff-base lysine.
 
-<p align="center"><img src="docs/function-domain.png" alt="Molecular function by domain of life across the type-I opsin set" width="640"></p>
-<p align="center"><i>Molecular function × domain of life across the type-I opsin set.</i></p>
+<p align="center">
+  🔬 <b>Explore the results:</b> <a href="https://rhodo.psi.ch/"><b>rhodo.psi.ch</b></a>
+  &nbsp;·&nbsp;
+  📄 <b>Paper:</b> <i>A Generic Residue-Numbering System for Microbial Rhodopsins</i><br>
+  F. Hidber <i>et al.</i> — under review at <i>npj Structural &amp; Molecular Biology</i> (2026)
+</p>
 
 ## Built on ProtOS
 
@@ -60,10 +63,3 @@ See [`GUIDE.md`](GUIDE.md) for the full walkthrough and the required data folder
 GRN is the coordinate system that lets **[Lambda](https://github.com/flurinh/lambda)** line up
 binding pockets across opsins and predict their colour.
 
----
-
-<p align="center">
-◀ <b>Previously:</b> <a href="https://github.com/flurinh/protos">ProtOS — the framework underneath</a>
-&nbsp;·&nbsp;
-<b>Next:</b> <a href="https://github.com/flurinh/lambda">Lambda — predicting opsin colour</a> ▶
-</p>
