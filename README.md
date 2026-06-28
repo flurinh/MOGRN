@@ -8,7 +8,7 @@
 <p align="center"><img src="docs/grn-positions.jpg" alt="Key GRN microswitch positions on bacteriorhodopsin" width="380"></p>
 
 <p align="center">
-  <a href="https://flurinh.github.io">◆ Portfolio</a> &nbsp;·&nbsp;
+  <a href="https://flurinh.github.io/aboutme">◆ Portfolio</a> &nbsp;·&nbsp;
   <b>The build:</b>
   <a href="https://github.com/flurinh/LM-DTA">LM-DTA</a> →
   <a href="https://github.com/flurinh/mt">Master thesis</a> →
