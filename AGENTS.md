@@ -1,3 +1,45 @@
+# Protected Project Workflow
+
+This standing workflow supersedes any older project-local language requiring
+OVERLORD admission, an exact-head publication ledger, or a durable local
+feature branch.
+
+## Authority and Delivery
+
+- The protected project coordinator alone decides when a coherent technical
+  delivery is ready and alone publishes that delivery as one Draft PR.
+- The protected project coordinator runs GPT-5.6-Sol High.
+- OVERLORD admission is not required before pushing or opening the Draft PR.
+- Only the user may accept or reject a delivery, approve a PR, transition a
+  Draft PR to ready, or merge it.
+
+## Development and Publication
+
+- `master` is the sole durable development line. A GitHub head used for review
+  is a temporary remote PR ref; no local feature branch is required.
+- Publication consists of the protected project coordinator pushing the exact
+  coherent head to one temporary remote ref and opening one Draft PR against
+  `master`.
+- Workers never push and never create, update, retarget, close, or otherwise
+  change PRs.
+- After the Draft PR is open, notify OVERLORD only with the PR URL, exact head,
+  outcome, validation evidence, material risks, and cross-project impact.
+  OVERLORD has no pre-publication admission role.
+- Existing coordinators started under an older push-deny policy may need to be
+  restarted or resumed with the normal `codex` command before publication.
+
+## Worker Startup and Model Routing
+
+- Start new Codex workers with `codex-worker`.
+- Route each worker to the cheapest tier adequate for its assigned task:
+  - Luna handles simple, bounded, low-risk work.
+  - GPT-5.6-Sol Low handles ordinary implementation and debugging.
+  - GPT-5.6-Sol High handles difficult architecture, science, security,
+    integrity, migrations, cross-project contracts, and material independent
+    review.
+- Escalate a worker to a more expensive tier only for a concrete task-specific
+  reason.
+
 # Repository Guidelines
 
 ## Project Structure & Module Organization

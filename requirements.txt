@@ -1,2 +1,3 @@
 logomaker>=0.8.7
 kaleido
+biopython>=1.83
