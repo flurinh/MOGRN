@@ -68,6 +68,8 @@ try:
     from src.visualize_alignment_grn import (
         create_opsin_visualization_from_workflow,
         create_opsin_visualization_from_workflow_b,
+        create_grid_rotation_movie,
+        create_msa_rotation_movie,
     )
     HAS_INTERACTIVE = True
 except ImportError:
@@ -531,7 +533,7 @@ def main(args=None):
     )
     parser.add_argument(
         "--only", type=str,
-        choices=["overview", "errors", "rmsd", "distance", "logo", "property", "interactive"],
+        choices=["overview", "errors", "rmsd", "distance", "logo", "property", "interactive", "movie", "msa-movie"],
         help="Generate only specific visualization"
     )
 
@@ -954,7 +956,7 @@ def main(args=None):
                 max_structures=150,
                 show_membrane=True,
                 membrane_opacity=0.05,
-                reference_id='4kkh'
+                reference_id='7bmh'
             )
             if fig:
                 print(f"[OK] Saved: {interactive_path}")
@@ -968,13 +970,52 @@ def main(args=None):
                 max_structures=150,
                 show_membrane=True,
                 membrane_opacity=0.05,
-                reference_id='4kkh'
+                reference_id='7bmh'
             )
             if fig_b:
                 print(f"[OK] Saved: {interactive_path_b}")
 
         except Exception as e:
             print(f"[ERROR] Interactive visualization failed: {e}")
+            traceback.print_exc()
+
+    # =========================================================================
+    # Visualization 9: Grid Rotation Movie
+    # =========================================================================
+    if HAS_INTERACTIVE and (args.only == "movie"):
+        print("\n[VIZ 9] Grid Rotation Movie...")
+        try:
+            movie_path = output_dir / "09_grid_rotation.mp4"
+            result = create_grid_rotation_movie(
+                cache_dir=str(cache_dir),
+                property_file=str(property_file),
+                grn_file=str(input_dir / "curated_grn_postprocessed.csv"),
+                output_file=str(movie_path),
+                reference_id='7bmh',
+            )
+            if result:
+                print(f"[OK] Saved: {movie_path}")
+        except Exception as e:
+            print(f"[ERROR] Grid rotation movie failed: {e}")
+            traceback.print_exc()
+
+    # =========================================================================
+    # Visualization 10: MSA Rotation Movie
+    # =========================================================================
+    if HAS_INTERACTIVE and (args.only == "msa-movie"):
+        print("\n[VIZ 10] MSA Rotation Movie...")
+        try:
+            msa_movie_path = output_dir / "10_MSA_rotation.mp4"
+            result = create_msa_rotation_movie(
+                cache_dir=str(cache_dir),
+                grn_file=str(input_dir / "curated_grn_postprocessed.csv"),
+                output_file=str(msa_movie_path),
+                reference_id='7bmh',
+            )
+            if result:
+                print(f"[OK] Saved: {msa_movie_path}")
+        except Exception as e:
+            print(f"[ERROR] MSA rotation movie failed: {e}")
             traceback.print_exc()
 
     # =========================================================================

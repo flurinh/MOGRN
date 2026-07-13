@@ -20,7 +20,7 @@ from protos.processing.structure import StructureProcessor
 from src.data_processing import load_experimental_dataset
 
 # Import helix color scheme
-from src.opsin_color_scheme import HELIX_NUMBER_COLORS, get_categorical_colors
+from src.opsin_color_scheme import HELIX_NUMBER_COLORS, PROPERTY1_COLORS_PREDEFINED, get_categorical_colors
 
 
 # Compatibility class for pickle loading
@@ -756,13 +756,14 @@ def calculate_membrane_orientation_fallback(reference_coords, reference_residues
     return rotation_matrix
 
 
-def apply_membrane_orientation(aligned_structures, reference_id='6xl3'):
+def apply_membrane_orientation(aligned_structures, reference_id='6xl3', flip_z=False):
     """
     Apply membrane orientation to all aligned structures based on reference structure PCA.
 
     Args:
         aligned_structures: Dictionary of aligned structures
         reference_id: ID of reference structure for PCA calculation
+        flip_z: If True, rotate 180° around X axis so extracellular side is at bottom
 
     Returns:
         oriented_structures: Dictionary of structures oriented for membrane visualization
@@ -796,6 +797,8 @@ def apply_membrane_orientation(aligned_structures, reference_id='6xl3'):
     membrane_rotation = calculate_membrane_orientation_from_helix_topology(
         ref_coords, ref_residues, helix_assignments
     )
+
+    # flip_z is now handled after all rotations are applied
 
     # Apply rotation to all structures
     oriented_structures = {}
@@ -840,7 +843,38 @@ def apply_membrane_orientation(aligned_structures, reference_id='6xl3'):
         elif retinal_data is not None:
             oriented_structures[struct_id]['retinal'] = None
 
+        # Rotate dataframe coordinates in tandem (used by visualization)
+        if 'dataframe' in struct_data and struct_data['dataframe'] is not None:
+            df = oriented_structures[struct_id]['dataframe']
+            if 'x' in df.columns and 'y' in df.columns and 'z' in df.columns:
+                df_coords = df[['x', 'y', 'z']].values
+                df_centered = df_coords - coord_center
+                df_rotated = np.dot(df_centered, membrane_rotation.T) + coord_center
+                df['x'] = df_rotated[:, 0]
+                df['y'] = df_rotated[:, 1]
+                df['z'] = df_rotated[:, 2]
+
         print(f"Applied membrane orientation to {struct_id}")
+
+    # Apply 180° rotation around X axis if requested - flips top/bottom
+    # Rotation around X: (x, y, z) → (x, -y, -z)
+    if flip_z:
+        print("Applying 180° rotation around X axis...")
+        for struct_id, struct_data in oriented_structures.items():
+            if 'coords' in struct_data:
+                struct_data['coords'][:, 1] = -struct_data['coords'][:, 1]  # negate Y
+                struct_data['coords'][:, 2] = -struct_data['coords'][:, 2]  # negate Z
+            if 'retinal' in struct_data and struct_data['retinal'] is not None:
+                ret_coords = struct_data['retinal'].get('coords')
+                if ret_coords is not None:
+                    ret_coords[:, 1] = -ret_coords[:, 1]  # negate Y
+                    ret_coords[:, 2] = -ret_coords[:, 2]  # negate Z
+            # Also rotate the dataframe coordinates (used by visualization)
+            if 'dataframe' in struct_data and struct_data['dataframe'] is not None:
+                df = struct_data['dataframe']
+                if 'y' in df.columns and 'z' in df.columns:
+                    df['y'] = -df['y']
+                    df['z'] = -df['z']
 
     print(f"Applied membrane orientation to {len(oriented_structures)} structures")
     return oriented_structures
@@ -2562,7 +2596,14 @@ def create_interactive_opsin_visualization_extended(
     print(f"Added {membrane_trace_count} membrane reference traces")
 
     # Update trace counts for complex slider system with color modes
-    total_base_traces = base_trace_count + retinal_trace_count + membrane_trace_count
+    # IMPORTANT: Trace order in figure is:
+    #   1. Base traces (helix + property): base_trace_count
+    #   2. Retinal traces: retinal_trace_count
+    #   3. Helix highlight traces: len(all_grn_positions)
+    #   4. Property highlight traces: len(all_grn_positions) if property_data
+    #   5. Table traces: len(all_grn_positions)
+    #   6. Membrane traces: membrane_trace_count (LAST!)
+    highlight_start_idx = base_trace_count + retinal_trace_count
 
     # Create complex slider and button system
     # We need to handle:
@@ -2588,30 +2629,26 @@ def create_interactive_opsin_visualization_extended(
         # Retinal traces (always visible when present)
         visibility.extend([True] * retinal_trace_count)
 
-        # Membrane trace (always visible)
-        visibility.extend([True] * membrane_trace_count)
-
         # Highlight traces (helix vs property) - only show if show_grn is True
-        if color_mode == 'helix':
-            # Show helix highlights, hide property highlights
-            visibility.extend([False] * len(all_grn_positions))  # All helix highlights hidden
-            if show_grn:
-                visibility[total_base_traces + grn_index] = True  # Only current helix highlight visible
-            if property_data:
-                visibility.extend([False] * len(all_grn_positions))  # All property highlights hidden
-        else:  # property mode
-            # Hide helix highlights, show property highlights
-            visibility.extend([False] * len(all_grn_positions))  # All helix highlights hidden
-            if property_data:
-                visibility.extend([False] * len(all_grn_positions))  # All property highlights hidden
-                if show_grn:
-                    visibility[total_base_traces + len(all_grn_positions) + grn_index] = True  # Only current property highlight visible
+        # Helix highlights
+        visibility.extend([False] * len(all_grn_positions))  # All helix highlights hidden
+        if color_mode == 'helix' and show_grn:
+            visibility[highlight_start_idx + grn_index] = True  # Only current helix highlight visible
+
+        # Property highlights
+        if property_data:
+            visibility.extend([False] * len(all_grn_positions))  # All property highlights hidden
+            if color_mode == 'property' and show_grn:
+                visibility[highlight_start_idx + len(all_grn_positions) + grn_index] = True  # Only current property highlight visible
 
         # Table traces (same for both modes) - only show if show_grn is True
         table_start_idx = len(visibility)
         visibility.extend([False] * len(all_grn_positions))  # All table traces hidden
         if show_grn:
             visibility[table_start_idx + grn_index] = True  # Only current table visible
+
+        # Membrane trace (always visible) - LAST in trace order
+        visibility.extend([True] * membrane_trace_count)
 
         return visibility
 
@@ -2811,7 +2848,7 @@ def create_opsin_visualization_from_workflow(
     property_file="property/mo_exp_ST1.csv",
     grn_file="opsin_output/curated_grn_postprocessed.csv",
     output_file="opsin_output/interactive_grn_alignment_3d.html",
-    reference_id='4kkh',
+    reference_id='7bmh',
     **viz_kwargs
 ):
     """
@@ -2905,7 +2942,7 @@ def create_opsin_visualization_from_workflow_b(
     property_file="property/mo_exp_ST1.csv",
     grn_file="opsin_output/curated_grn_postprocessed.csv",
     output_file="opsin_output/interactive_grn_alignment_b.html",
-    reference_id='4kkh',
+    reference_id='7bmh',
     **viz_kwargs
 ):
     """Generate the enhanced interactive figure with retinal overlay and amino-acid filtering."""
@@ -2984,6 +3021,494 @@ def create_opsin_visualization_from_workflow_b(
     print(f"Enhanced interactive visualization saved to: {output_file}")
 
     return fig
+
+
+def create_grid_rotation_movie(
+    cache_dir="opsin_output/cache",
+    property_file="property/mo_exp_ST1.csv",
+    grn_file="opsin_output/curated_grn_postprocessed.csv",
+    output_file="opsin_output/paper_figures/09_grid_rotation.mp4",
+    reference_id='7bmh',
+    cell_size=50.0,
+    n_frames=360,
+    fps=30,
+    elevation=25,
+    figsize=(20, 20),
+    dpi=150,
+):
+    """
+    Create a grid movie where each opsin structure rotates in its own cell.
+
+    The screen is divided into a 12x12 grid of fixed cells.  Each structure
+    is centred in its cell and rotated 360 degrees in place via manual
+    orthographic projection (2-D scatter updated per frame).  Structures
+    are coloured uniformly by their molecular function.
+
+    Args:
+        cache_dir: Path to RMSD / processed-structure cache
+        property_file: Path to property CSV with molecular function annotations
+        grn_file: Path to curated GRN table
+        output_file: Output MP4 path
+        reference_id: Global alignment reference structure
+        cell_size: Size of each grid cell in Angstroms (screen-data units)
+        n_frames: Number of animation frames (360 = 1 degree per frame)
+        fps: Frames per second for the output video
+        elevation: Fixed elevation angle in degrees for the view
+        figsize: Figure size in inches
+        dpi: Dots per inch for rendered frames
+    """
+    import math
+    import matplotlib.pyplot as plt
+    import matplotlib.colors as mcolors
+    from matplotlib.animation import FuncAnimation, FFMpegWriter
+
+    # ------------------------------------------------------------------
+    # 1. Load and align structures (same pipeline as workflow_b)
+    # ------------------------------------------------------------------
+    print("=== Loading RMSD Cache (grid movie) ===")
+    cache_data = load_rmsd_cache(cache_dir)
+    alignment_paths = cache_data.get('alignment_paths', {})
+    print(f"Found {len(alignment_paths)} alignment paths")
+
+    print("\n=== Loading Processed Structures ===")
+    processed_structures = load_processed_structures(cache_dir)
+
+    print("\n=== Loading GRN Table ===")
+    grn_df = load_grn_table(grn_file)
+
+    print("\n=== Loading Property Data ===")
+    from src.data_processing import load_opsin_property_data
+    property_path = Path(property_file)
+    property_data = {}
+    if property_path.exists():
+        try:
+            property_result = load_opsin_property_data(property_path, processed_structures)
+            if property_result and 'properties' in property_result:
+                property_data = property_result['properties']
+                print(f"Loaded property data for {len(property_data)} structures")
+        except Exception as exc:
+            print(f"Failed to load property data: {exc}")
+
+    print("\n=== Extracting CA Coordinates with GRN Mapping ===")
+    structures = extract_ca_coordinates_with_grn(
+        processed_structures, grn_df, chain_id='A', use_helix_only=True
+    )
+    if not structures:
+        print("No structures loaded!")
+        return None
+
+    # Exclude structures with erroneous alignment shifts
+    excluded_structures = {'VbACR2_model_0', 'S13_Bin138_Proteo_SR_model_0'}
+    before_count = len(structures)
+    structures = {k: v for k, v in structures.items() if k not in excluded_structures}
+    if len(structures) < before_count:
+        print(f"[Info] Excluded {before_count - len(structures)} structures: {excluded_structures}")
+
+    print("\n=== Applying Alignment Transformations ===")
+    aligned_structures = apply_alignment_transformations(structures, alignment_paths, reference_id)
+
+    print("\n=== Applying Membrane Orientation ===")
+    oriented_structures = apply_membrane_orientation(aligned_structures, reference_id)
+
+    # Centre each structure on its own centroid (not global) so it sits
+    # at the origin of its grid cell.
+    for data in oriented_structures.values():
+        if 'coords' in data:
+            centroid = np.mean(data['coords'], axis=0)
+            data['coords'] = data['coords'] - centroid
+
+    # ------------------------------------------------------------------
+    # 2. Prepare per-structure data for the 12x12 grid
+    # ------------------------------------------------------------------
+    struct_ids = sorted(oriented_structures.keys())
+    n_structs = len(struct_ids)
+    n_cols = 12
+    n_rows = math.ceil(n_structs / n_cols)
+    print(f"\n=== Arranging {n_structs} structures in {n_rows}x{n_cols} grid (cell={cell_size} A) ===")
+
+    # Molecular-function colours from thesis colorscales.yaml
+    mol_func_colors = {
+        'Proton Pump':               '#3d5a80',  # Slate
+        'Cation Channel':            '#c1666b',  # Terracotta
+        'Regulator of fused domain': '#7a5980',  # Mauve
+        'Chloride Pump':             '#457b6b',  # Sage
+        'Anion Channel':             '#d4a03c',  # Ochre
+        'Signal Activator':          '#6a994e',  # Olive
+        'Sodium Pump':               '#bc6c25',  # Rust
+        'Unknown':                   '#adb5bd',  # Light gray
+    }
+    default_color = mol_func_colors['Unknown']
+
+    # Build case-insensitive property lookup
+    _prop_lower = {k.lower(): v for k, v in property_data.items()}
+
+    def _get_mol_func_color(struct_id):
+        """Return hex colour for a structure based on its molecular function."""
+        props = property_data.get(struct_id) or _prop_lower.get(struct_id.lower(), {})
+        mol_func = props.get('molecular_function', 'Unknown')
+        if not mol_func or mol_func == '':
+            mol_func = 'Unknown'
+        return mol_func_colors.get(mol_func, default_color)
+
+    def _get_mol_func(struct_id):
+        """Return molecular function string for a structure."""
+        props = property_data.get(struct_id) or _prop_lower.get(struct_id.lower(), {})
+        mf = props.get('molecular_function', 'Unknown')
+        return mf if mf else 'Unknown'
+
+    # Pre-compute centred coords (Nx3 numpy), colour arrays, and grid positions
+    struct_coords = []   # list of (N, 3) arrays – already centred at origin
+    struct_rgba = []     # list of (N, 4) RGBA arrays
+    grid_offsets = []    # list of (grid_x, grid_y) in data units
+    struct_labels = []   # list of (label_str, grid_x, grid_y)
+    total_points = 0
+
+    func_counts = {}  # track molecular function distribution
+
+    for idx, sid in enumerate(struct_ids):
+        row = idx // n_cols
+        col = idx % n_cols
+        # Row 0 at top of image (reading order)
+        grid_x = col * cell_size
+        grid_y = (n_rows - 1 - row) * cell_size
+
+        sdata = oriented_structures[sid]
+        coords = sdata['coords']  # (N, 3), already centred
+
+        # Uniform colour for the entire structure from molecular function
+        hex_color = _get_mol_func_color(sid)
+        rgba_val = mcolors.to_rgba(hex_color)
+        rgba = np.tile(rgba_val, (len(coords), 1))
+
+        # Track for summary
+        mf = _get_mol_func(sid)
+        func_counts[mf] = func_counts.get(mf, 0) + 1
+
+        struct_coords.append(coords)
+        struct_rgba.append(rgba)
+        grid_offsets.append((grid_x, grid_y))
+        struct_labels.append((sid, grid_x, grid_y))
+        total_points += len(coords)
+
+    print(f"Total CA points across all structures: {total_points}")
+    print(f"Molecular function distribution: {func_counts}")
+
+    # ------------------------------------------------------------------
+    # 3. Orthographic projection helper
+    # ------------------------------------------------------------------
+    def _view_vectors(azim_deg, elev_deg):
+        """Return (right, up) unit vectors for orthographic projection."""
+        a = np.radians(azim_deg)
+        e = np.radians(elev_deg)
+        right = np.array([-np.sin(a), np.cos(a), 0.0])
+        up = np.array([-np.cos(a) * np.sin(e),
+                        -np.sin(a) * np.sin(e),
+                        np.cos(e)])
+        return right, up
+
+    # ------------------------------------------------------------------
+    # 4. Set up 2-D figure with white background
+    # ------------------------------------------------------------------
+    fig, ax = plt.subplots(figsize=figsize, facecolor='white')
+    ax.set_facecolor('white')
+    ax.set_aspect('equal')
+    ax.set_axis_off()
+
+    pad = cell_size * 0.5
+    ax.set_xlim(-pad, n_cols * cell_size - cell_size + pad)
+    ax.set_ylim(-pad, n_rows * cell_size - cell_size + pad)
+    fig.subplots_adjust(left=0, right=1, bottom=0, top=1)
+
+    # Legend for molecular function colours
+    from matplotlib.lines import Line2D
+    legend_handles = []
+    for func_name in sorted(func_counts.keys()):
+        color = mol_func_colors.get(func_name, default_color)
+        count = func_counts[func_name]
+        legend_handles.append(
+            Line2D([0], [0], marker='o', color='w', markerfacecolor=color,
+                   markersize=8, label=f"{func_name} ({count})", linewidth=0)
+        )
+    ax.legend(handles=legend_handles, loc='lower right', fontsize=8,
+              frameon=True, facecolor='white', edgecolor='gray',
+              title='Molecular Function', title_fontsize=9)
+
+    # Pre-allocate flat arrays for the single scatter artist
+    flat_xy = np.zeros((total_points, 2))
+    flat_rgba = np.concatenate(struct_rgba, axis=0)  # colours never change
+
+    scatter = ax.scatter(
+        flat_xy[:, 0], flat_xy[:, 1],
+        c=flat_rgba, s=3, linewidths=0, marker='o',
+    )
+
+    # ------------------------------------------------------------------
+    # 5. Animation: rotate each structure in place
+    # ------------------------------------------------------------------
+    # Pre-compute segment boundaries for fast slicing
+    seg_starts = []
+    offset = 0
+    for coords in struct_coords:
+        seg_starts.append(offset)
+        offset += len(coords)
+
+    def _update(frame):
+        azim = frame  # 1 degree per frame
+        right, up = _view_vectors(azim, elevation)
+
+        for i, (coords, (gx, gy)) in enumerate(zip(struct_coords, grid_offsets)):
+            sx = coords @ right + gx
+            sy = coords @ up + gy
+            start = seg_starts[i]
+            end = start + len(coords)
+            flat_xy[start:end, 0] = sx
+            flat_xy[start:end, 1] = sy
+
+        scatter.set_offsets(flat_xy)
+        return [scatter]
+
+    # Initialise with frame 0
+    _update(0)
+
+    anim = FuncAnimation(fig, _update, frames=n_frames,
+                         interval=1000 // fps, blit=True)
+
+    # ------------------------------------------------------------------
+    # 6. Save as MP4
+    # ------------------------------------------------------------------
+    out_path = Path(output_file)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    writer = FFMpegWriter(fps=fps, bitrate=5000)
+    print(f"\n=== Rendering {n_frames} frames at {fps} fps -> {out_path} ===")
+    anim.save(str(out_path), writer=writer, dpi=dpi)
+    plt.close(fig)
+    print(f"[OK] Saved movie: {out_path}")
+    return str(out_path)
+
+
+def create_msa_rotation_movie(
+    cache_dir="opsin_output/cache",
+    grn_file="opsin_output/curated_grn_postprocessed.csv",
+    output_file="opsin_output/paper_figures/10_MSA_rotation.mp4",
+    reference_id='7bmh',
+    n_frames=360,
+    fps=30,
+    elevation=25,
+    figsize=(12, 12),
+    dpi=150,
+):
+    """
+    Create a rotation movie of all aligned opsin structures superimposed.
+
+    All structures are overlapped at the same origin (the multiple structure
+    alignment view) and coloured by helix number.  The view rotates 360
+    degrees via orthographic projection.
+
+    Args:
+        cache_dir: Path to RMSD / processed-structure cache
+        grn_file: Path to curated GRN table
+        output_file: Output MP4 path
+        reference_id: Global alignment reference structure
+        n_frames: Number of animation frames (360 = 1 degree per frame)
+        fps: Frames per second for the output video
+        elevation: Fixed elevation angle in degrees for the view
+        figsize: Figure size in inches
+        dpi: Dots per inch for rendered frames
+    """
+    import matplotlib.pyplot as plt
+    import matplotlib.colors as mcolors
+    from matplotlib.lines import Line2D
+    from matplotlib.animation import FuncAnimation, FFMpegWriter
+
+    # ------------------------------------------------------------------
+    # 1. Load and align structures (same pipeline as workflow_b)
+    # ------------------------------------------------------------------
+    print("=== Loading RMSD Cache (MSA movie) ===")
+    cache_data = load_rmsd_cache(cache_dir)
+    alignment_paths = cache_data.get('alignment_paths', {})
+    print(f"Found {len(alignment_paths)} alignment paths")
+
+    print("\n=== Loading Processed Structures ===")
+    processed_structures = load_processed_structures(cache_dir)
+
+    print("\n=== Loading GRN Table ===")
+    grn_df = load_grn_table(grn_file)
+
+    print("\n=== Extracting CA Coordinates with GRN Mapping ===")
+    structures = extract_ca_coordinates_with_grn(
+        processed_structures, grn_df, chain_id='A', use_helix_only=True
+    )
+    if not structures:
+        print("No structures loaded!")
+        return None
+
+    # Exclude structures with erroneous alignment shifts
+    excluded_structures = {'VbACR2_model_0', 'S13_Bin138_Proteo_SR_model_0'}
+    before_count = len(structures)
+    structures = {k: v for k, v in structures.items() if k not in excluded_structures}
+    if len(structures) < before_count:
+        print(f"[Info] Excluded {before_count - len(structures)} structures: {excluded_structures}")
+
+    print("\n=== Applying Alignment Transformations ===")
+    aligned_structures = apply_alignment_transformations(structures, alignment_paths, reference_id)
+
+    print("\n=== Applying Membrane Orientation ===")
+    oriented_structures = apply_membrane_orientation(aligned_structures, reference_id)
+
+    # Centre on global centroid
+    all_coords_list = []
+    for data in oriented_structures.values():
+        if 'coords' in data:
+            all_coords_list.append(data['coords'])
+    if all_coords_list:
+        all_coords_arr = np.concatenate(all_coords_list, axis=0)
+        global_center = np.mean(all_coords_arr, axis=0)
+        for data in oriented_structures.values():
+            if 'coords' in data:
+                data['coords'] = data['coords'] - global_center
+
+    # ------------------------------------------------------------------
+    # 2. Collect all points and build bond table
+    # ------------------------------------------------------------------
+    helix_colors = {
+        0: '#D3D3D3',
+        1: HELIX_NUMBER_COLORS[1],
+        2: HELIX_NUMBER_COLORS[2],
+        3: HELIX_NUMBER_COLORS[3],
+        4: HELIX_NUMBER_COLORS[4],
+        5: HELIX_NUMBER_COLORS[5],
+        6: HELIX_NUMBER_COLORS[6],
+        7: HELIX_NUMBER_COLORS[7],
+    }
+
+    all_coords = []
+    all_rgba = []
+
+    # Bond indices: pairs of global point indices for consecutive residues
+    # within the same helix of a single structure.
+    bond_start = []   # global index of bond start
+    bond_end = []     # global index of bond end
+    bond_rgba = []    # colour per bond (same as helix colour)
+
+    global_offset = 0
+    for sid in sorted(oriented_structures.keys()):
+        sdata = oriented_structures[sid]
+        coords = sdata['coords']
+        helix_nums = sdata.get('helix_numbers', np.zeros(len(coords), dtype=int))
+
+        for h in helix_nums:
+            all_rgba.append(mcolors.to_rgba(helix_colors.get(int(h), '#D3D3D3')))
+        all_coords.append(coords)
+
+        n = len(coords)
+        for i in range(n - 1):
+            h_cur = int(helix_nums[i])
+            h_nxt = int(helix_nums[i + 1])
+            if h_cur == h_nxt and h_cur > 0:
+                bond_start.append(global_offset + i)
+                bond_end.append(global_offset + i + 1)
+                bond_rgba.append(mcolors.to_rgba(helix_colors.get(h_cur, '#D3D3D3')))
+
+        global_offset += n
+
+    all_coords = np.concatenate(all_coords, axis=0)  # (N_total, 3)
+    all_rgba = np.array(all_rgba)                      # (N_total, 4)
+    bond_start = np.array(bond_start, dtype=int)
+    bond_end = np.array(bond_end, dtype=int)
+    bond_rgba = np.array(bond_rgba)
+    total_points = len(all_coords)
+    total_bonds = len(bond_start)
+    print(f"\n=== {len(oriented_structures)} structures, {total_points} CA points, {total_bonds} bonds ===")
+
+    # ------------------------------------------------------------------
+    # 3. Orthographic projection helper
+    # ------------------------------------------------------------------
+    def _view_vectors(azim_deg, elev_deg):
+        a = np.radians(azim_deg)
+        e = np.radians(elev_deg)
+        right = np.array([-np.sin(a), np.cos(a), 0.0])
+        up = np.array([-np.cos(a) * np.sin(e),
+                        -np.sin(a) * np.sin(e),
+                        np.cos(e)])
+        return right, up
+
+    # ------------------------------------------------------------------
+    # 4. Set up figure
+    # ------------------------------------------------------------------
+    from matplotlib.collections import LineCollection
+
+    fig, ax = plt.subplots(figsize=figsize, facecolor='white')
+    ax.set_facecolor('white')
+    ax.set_aspect('equal')
+    ax.set_axis_off()
+
+    # Determine axis limits from the maximum projected extent (worst case)
+    max_extent = np.max(np.abs(all_coords)) + 5.0
+    ax.set_xlim(-max_extent, max_extent)
+    ax.set_ylim(-max_extent, max_extent)
+    fig.subplots_adjust(left=0.02, right=0.98, bottom=0.02, top=0.98)
+
+    # Pre-allocate projected coordinates
+    flat_xy = np.zeros((total_points, 2))
+
+    # Bonds as a LineCollection (placeholder segments, updated each frame)
+    dummy_segments = np.zeros((total_bonds, 2, 2))
+    line_coll = LineCollection(dummy_segments, colors=bond_rgba,
+                               linewidths=0.4, alpha=0.5)
+    ax.add_collection(line_coll)
+
+    # Legend for helix colours
+    helix_labels = {
+        1: 'Helix 1', 2: 'Helix 2', 3: 'Helix 3', 4: 'Helix 4',
+        5: 'Helix 5', 6: 'Helix 6', 7: 'Helix 7', 0: 'Non-helix',
+    }
+    legend_handles = []
+    for h_num in [1, 2, 3, 4, 5, 6, 7, 0]:
+        legend_handles.append(
+            Line2D([0], [0], marker='_', color=helix_colors[h_num],
+                   markerfacecolor=helix_colors[h_num], markersize=8,
+                   label=helix_labels[h_num], linewidth=2)
+        )
+    ax.legend(handles=legend_handles, loc='upper right', fontsize=9,
+              frameon=True, facecolor='white', edgecolor='gray',
+              title='Helix', title_fontsize=10)
+
+    # ------------------------------------------------------------------
+    # 5. Animation
+    # ------------------------------------------------------------------
+    # Pre-allocate segment array for bonds
+    segments = np.zeros((total_bonds, 2, 2))
+
+    def _update(frame):
+        azim = frame
+        right, up = _view_vectors(azim, elevation)
+        flat_xy[:, 0] = all_coords @ right
+        flat_xy[:, 1] = all_coords @ up
+
+        # Update bond segments from projected coordinates
+        segments[:, 0, :] = flat_xy[bond_start]
+        segments[:, 1, :] = flat_xy[bond_end]
+        line_coll.set_segments(segments)
+        return [line_coll]
+
+    _update(0)
+
+    anim = FuncAnimation(fig, _update, frames=n_frames,
+                         interval=1000 // fps, blit=True)
+
+    # ------------------------------------------------------------------
+    # 6. Save as MP4
+    # ------------------------------------------------------------------
+    out_path = Path(output_file)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    writer = FFMpegWriter(fps=fps, bitrate=5000)
+    print(f"\n=== Rendering {n_frames} frames at {fps} fps -> {out_path} ===")
+    anim.save(str(out_path), writer=writer, dpi=dpi)
+    plt.close(fig)
+    print(f"[OK] Saved movie: {out_path}")
+    return str(out_path)
 
 
 def main():

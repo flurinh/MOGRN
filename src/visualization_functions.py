@@ -1848,12 +1848,12 @@ def plot_error_box_comparison(set_a_df: pd.DataFrame,
     ]
     ax.legend(
         handles=legend_elements,
-        loc='upper left',
+        loc='lower left',
         fontsize=label_fontsize,
         frameon=False,
         handlelength=1.5,
         borderpad=0.4,
-        bbox_to_anchor=(0.02, 0.98),
+        bbox_to_anchor=(0.0, 1.02),
         borderaxespad=0.0,
         bbox_transform=ax.transAxes
     )
