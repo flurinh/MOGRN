@@ -147,12 +147,27 @@ def calculate_structure_errors(data_dict, output_dir='outputs', visualize=True):
     # Create outputs directory if it doesn't exist
     os.makedirs(output_dir, exist_ok=True)
 
-    # Unpack necessary data
-    cp_mo_exp = data_dict['cp_mo_exp']
-    cp_mo_pred = data_dict['cp_mo_pred']
-    cp_hide_exp = data_dict['cp_hide_exp']
-    cp_hide_pred = data_dict['cp_hide_pred']
+    # Unpack necessary data - check if legacy processors are available
+    cp_mo_exp = data_dict.get('cp_mo_exp')
+    cp_mo_pred = data_dict.get('cp_mo_pred')
+    cp_hide_exp = data_dict.get('cp_hide_exp')
+    cp_hide_pred = data_dict.get('cp_hide_pred')
     processed_structures = data_dict['processed_structures']
+
+    # Check if we have full legacy processors or just compatibility objects
+    def is_full_processor(obj):
+        return obj is not None and hasattr(obj, 'format_data_types') and hasattr(obj, 'data')
+
+    has_full_processors = all(is_full_processor(p) for p in [cp_mo_exp, cp_mo_pred, cp_hide_exp, cp_hide_pred])
+
+    if not has_full_processors:
+        print("[INFO] Legacy processor objects not available - skipping detailed error calculation")
+        print("[INFO] To run error calculation, use the legacy data_processing workflow")
+        return {
+            'error_results': {},
+            'hide_errors_df': pd.DataFrame(),
+            'mo_exp_errors_df': pd.DataFrame(),
+        }
 
     # Use the GLOBALLY DEFINED structure mapping - don't recreate it
     structure_mapping = data_dict.get('structure_mapping', {})
@@ -297,6 +312,24 @@ def calculate_structure_errors(data_dict, output_dir='outputs', visualize=True):
         # Create RMSD table
         mo_exp_errors_df = make_rmsd_table(binding_results_mo_exp)
         mo_exp_errors_df = mo_exp_errors_df[mo_exp_errors_df['retinal_rmsd'] < 5]  # Filter out high RMSD values
+
+        # Add dataset_split column (A = benchmark set, B = blind test set)
+        datasets = data_dict.get('datasets', {})
+        mo_exp_a_ids = set(datasets.get('mo_exp_A', []))
+        mo_exp_b_ids = set(datasets.get('mo_exp_B', []))
+
+        def get_dataset_split(protein_id):
+            if protein_id in mo_exp_a_ids:
+                return 'A'
+            elif protein_id in mo_exp_b_ids:
+                return 'B'
+            else:
+                return 'Unknown'
+
+        mo_exp_errors_df['dataset_split'] = mo_exp_errors_df['protein'].apply(get_dataset_split)
+        print(f"Dataset split: {(mo_exp_errors_df['dataset_split'] == 'A').sum()} in A (benchmark), "
+              f"{(mo_exp_errors_df['dataset_split'] == 'B').sum()} in B (blind test)")
+
         mo_exp_errors_df.to_csv(os.path.join(output_dir, 'mo_exp_errors.csv'))
         print(f"MO errors saved to {os.path.join(output_dir, 'mo_exp_errors.csv')}")
     else:

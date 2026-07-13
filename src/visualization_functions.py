@@ -1020,26 +1020,34 @@ def plot_distances_with_std(distance_table, title="Distance to Retinal by Positi
             line_plot_color = HELIX_NUMBER_COLORS.get(helix_idx_val, OPSIN_COLORS['gray_6_dark_mid'])  # Renamed
             ax.plot(line_x_coords, line_y_coords, '-', color=line_plot_color, linewidth=2.0, alpha=0.7)
 
-    # Remove x-axis ticks and labels
-    ax.set_xticks([])
-    ax.set_xticklabels([])
-
-    max_y_for_text_label = (max(y_means_final) if y_means_final else 10)  # Renamed
-    for i, pos_val_str in enumerate(sorted_positions_final):  # Renamed
+    # Collect x.50 positions for x-axis labels and vertical lines
+    x50_ticks = []
+    x50_labels = []
+    x50_colors = []
+    for i, pos_val_str in enumerate(sorted_positions_final):
         s = str(pos_val_str)
         is_x50_type = (s.endswith('.50') and s.split('.')[0].isdigit()) or \
                       (s.endswith('x50') and s.split('x')[0].isdigit())  # BW-like Xx50
 
         if is_x50_type:
-            helix_str_part = s.split('.')[0] if '.' in s else s.split('x')[0]  # Renamed
+            helix_str_part = s.split('.')[0] if '.' in s else s.split('x')[0]
             if helix_str_part.isdigit():
-                helix_idx_val_x50 = int(helix_str_part)  # Renamed
-                color_x50 = HELIX_NUMBER_COLORS.get(helix_idx_val_x50, OPSIN_COLORS['gray_5_mid'])  # Renamed
+                helix_idx_val_x50 = int(helix_str_part)
+                color_x50 = HELIX_NUMBER_COLORS.get(helix_idx_val_x50, OPSIN_COLORS['gray_5_mid'])
+                # Add vertical line
                 ax.axvline(x=x_indices_final[i], color=color_x50, linestyle=':', alpha=0.7,
-                           linewidth=1.5)  # Changed to ':'
-                ax.text(x_indices_final[i], max_y_for_text_label * 1.02, f"H{helix_str_part}",
-                        # Reduced y-offset slightly
-                        ha='center', va='bottom', fontsize=14, color=color_x50, fontweight='bold')
+                           linewidth=1.5)
+                # Collect tick info
+                x50_ticks.append(x_indices_final[i])
+                x50_labels.append(s)
+                x50_colors.append(color_x50)
+
+    # Set x-axis ticks only at x.50 positions
+    ax.set_xticks(x50_ticks)
+    ax.set_xticklabels(x50_labels, fontsize=14, fontweight='bold')
+    # Color each tick label individually
+    for tick_label, color in zip(ax.get_xticklabels(), x50_colors):
+        tick_label.set_color(color)
 
     # Add 3 horizontal lines
     h_line_style = {'color': OPSIN_COLORS['gray_5_mid'], 'linestyle': '--', 'alpha': 0.7, 'linewidth': 1.2}  # Renamed
@@ -1055,8 +1063,12 @@ def plot_distances_with_std(distance_table, title="Distance to Retinal by Positi
     # ax.text(text_x_pos_lines, 6.0, '6.0 Å', va='center_baseline', ha='right', color=h_line_style['color'], fontsize=11)
 
     ax.grid(True, alpha=0.3, axis='y', linestyle=':')  # Keep y-axis grid, make it dotted
-    ax.set_xlabel('Transmembrane Position (Sorted)', fontsize=16)  # Updated X-label
-    ax.set_ylabel(f'Distance to Retinal (Å){" - CA" if use_ca else ""}', fontsize=16)  # Combined label
+    ax.set_xlabel('GRN Position', fontsize=14, fontweight='bold')  # Cleaner X-label
+    ax.set_ylabel('Distance (Å)', fontsize=14, fontweight='bold')  # Cleaner Y-label, same size as H1-H7
+
+    # Make y-axis tick labels bigger (same as H1-H7 labels)
+    ax.tick_params(axis='y', labelsize=14)
+    ax.tick_params(axis='x', labelsize=14)
 
     if y_means_final:
         max_y_err_val = max(y_errors_final) if y_errors_final else 0  # Renamed
@@ -1066,17 +1078,21 @@ def plot_distances_with_std(distance_table, title="Distance to Retinal by Positi
     else:
         ax.set_ylim(0, 10)
 
-    ax.set_title(f"{title} ({'CA Atoms' if use_ca else 'All Atoms'})", fontsize=20)
+    # Cleaner title
+    atom_type = "Cα" if use_ca else "All-Atom"
+    ax.set_title(f"Distance to Retinal ({atom_type})", fontsize=16, fontweight='bold')
 
     legend_elements_list = [  # Renamed
-        Patch(color=HELIX_NUMBER_COLORS[h_idx], label=f"Helix {h_idx}")
+        Patch(color=HELIX_NUMBER_COLORS[h_idx], label=f"H{h_idx}")
         for h_idx in range(1, 8) if h_idx in HELIX_NUMBER_COLORS
     ]
     if legend_elements_list:
-        ax.legend(handles=legend_elements_list, loc='upper right', ncol=2, fontsize=12,
-                  title="TM Helices", title_fontsize=13, frameon=True, framealpha=0.85)  # Added title
+        # Place legend outside the plot area, to the upper right
+        ax.legend(handles=legend_elements_list, loc='upper left', bbox_to_anchor=(1.01, 1.0),
+                  ncol=1, fontsize=14, title="Helix", title_fontsize=14,
+                  frameon=True, framealpha=0.85)
 
-    plt.tight_layout()
+    plt.tight_layout(rect=[0, 0, 0.88, 1])  # Make room for legend on the right
     return fig
 
 
@@ -1710,7 +1726,7 @@ def plot_error_violin_panel(error_df, dataset_col='Dataset',
 def plot_error_box_comparison(set_a_df: pd.DataFrame,
                               set_b_df: pd.DataFrame,
                               metrics=None,
-                              dataset_labels=("Benchmark set", "Blind test set"),
+                              dataset_labels=("Benchmark set A", "Blind set B"),
                               output_path=None,
                               figure_size=(13, 6)):
     """Plot paired boxplots with muted colors for the key RMSD metrics."""

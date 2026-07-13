@@ -1,4 +1,16 @@
 # lyr_processing.py
+"""
+LYR (Lysine-Retinal Schiff base) processing utilities.
+
+This module provides functions to:
+1. Split LYR residues into LYS (lysine) + RET (retinal) components
+2. Rename LIG (generic ligand) to RET for predicted structures
+3. Standardize all retinal naming at the beginning of the workflow
+
+IMPORTANT: These functions should be called EARLY in the workflow,
+before any caching or downstream processing, to ensure consistent
+residue naming throughout the pipeline.
+"""
 
 import pandas as pd
 import numpy as np # For NaN handling if needed
@@ -229,3 +241,103 @@ def process_lyr_in_processor_data(processor, retinal_res_name: str = 'RET') -> N
         print(f"--- LYR processing for processor finished ---")
     else:
         print(f"Processor {getattr(processor, 'name', 'Unnamed Processor')} has no data or data is not a DataFrame. Skipping LYR processing.")
+
+
+def standardize_retinal_naming(df: pd.DataFrame, retinal_res_name: str = 'RET', verbose: bool = False) -> pd.DataFrame:
+    """
+    Standardize all retinal-related residue naming in a structure DataFrame.
+
+    This function should be called EARLY in the workflow (before caching)
+    to ensure consistent residue naming throughout the pipeline.
+
+    Processing order:
+    1. LYR → LYS + RET (split covalently-bound retinal-lysine)
+    2. LIG → RET (rename generic ligand to retinal)
+
+    Args:
+        df: Structure DataFrame with res_name3l column
+        retinal_res_name: Name to use for retinal (default: 'RET')
+        verbose: Print processing details
+
+    Returns:
+        DataFrame with standardized retinal naming
+    """
+    if df is None or df.empty:
+        return df
+
+    if 'res_name3l' not in df.columns:
+        return df
+
+    df = df.copy()
+
+    # Step 1: Process LYR → LYS + RET
+    has_lyr = (df['res_name3l'] == 'LYR').any()
+    if has_lyr:
+        num_lyr_before = (df['res_name3l'] == 'LYR').sum()
+        if verbose:
+            print(f"    Processing LYR: {num_lyr_before} atoms")
+        df = process_lyr_in_dataframe(df, retinal_res_name=retinal_res_name)
+        num_lyr_after = (df['res_name3l'] == 'LYR').sum()
+        if verbose and num_lyr_after == 0:
+            num_lys = (df['res_name3l'] == 'LYS').sum()
+            num_ret = (df['res_name3l'] == retinal_res_name).sum()
+            print(f"    LYR split: LYS atoms, RET atoms added")
+
+    # Step 2: Rename LIG → RET
+    has_lig = (df['res_name3l'] == 'LIG').any()
+    if has_lig:
+        num_lig = (df['res_name3l'] == 'LIG').sum()
+        if verbose:
+            print(f"    Renaming LIG → {retinal_res_name}: {num_lig} atoms")
+        df.loc[df['res_name3l'] == 'LIG', 'res_name3l'] = retinal_res_name
+
+    return df
+
+
+def standardize_retinal_in_structures_dict(structures_dict: dict, retinal_res_name: str = 'RET', verbose: bool = True) -> dict:
+    """
+    Standardize retinal naming in all structures in a dictionary.
+
+    This processes both 'df' and 'df_norm' if present.
+
+    Args:
+        structures_dict: Dictionary of {struct_id: {'df': DataFrame, ...}}
+        retinal_res_name: Name to use for retinal
+        verbose: Print processing summary
+
+    Returns:
+        Dictionary with standardized structures
+    """
+    if verbose:
+        print(f"\n--- Standardizing retinal naming for {len(structures_dict)} structures ---")
+
+    lyr_processed = 0
+    lig_processed = 0
+
+    for struct_id, struct_data in structures_dict.items():
+        # Process main DataFrame
+        if 'df' in struct_data and isinstance(struct_data['df'], pd.DataFrame):
+            df = struct_data['df']
+            had_lyr = (df['res_name3l'] == 'LYR').any() if 'res_name3l' in df.columns else False
+            had_lig = (df['res_name3l'] == 'LIG').any() if 'res_name3l' in df.columns else False
+
+            struct_data['df'] = standardize_retinal_naming(df, retinal_res_name=retinal_res_name, verbose=False)
+
+            if had_lyr:
+                lyr_processed += 1
+            if had_lig:
+                lig_processed += 1
+
+        # Process normalized DataFrame if different from main
+        if 'df_norm' in struct_data and isinstance(struct_data['df_norm'], pd.DataFrame):
+            if struct_data['df_norm'] is not struct_data.get('df'):
+                struct_data['df_norm'] = standardize_retinal_naming(
+                    struct_data['df_norm'], retinal_res_name=retinal_res_name, verbose=False
+                )
+
+    if verbose:
+        print(f"  LYR→LYS+RET processed: {lyr_processed} structures")
+        print(f"  LIG→RET processed: {lig_processed} structures")
+        print("--- Retinal standardization complete ---")
+
+    return structures_dict

@@ -62,4 +62,3 @@ See [`GUIDE.md`](GUIDE.md) for the full walkthrough and the required data folder
 
 GRN is the coordinate system that lets **[Lambda](https://github.com/flurinh/lambda)** line up
 binding pockets across opsins and predict their colour.
-

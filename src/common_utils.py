@@ -6,65 +6,42 @@ import numpy as np
 from scipy.spatial.distance import cdist
 from scipy.optimize import linear_sum_assignment
 
+
 def compute_retinal_mean_closest_distance(exp_ret_coords, pred_ret_coords):
     """
-    Given two Nx3 arrays of coordinates for RET (retinal) atoms,
-    finds the best 1:1 pairing (Hungarian method) that minimizes
-    total distance. Returns the average matched distance.
-    
-    If the sets have different lengths, it matches the smaller
-    set to a subset of the larger set, ignoring extra atoms.
-    
+    Compute retinal RMSD using nearest-neighbor matching.
+
+    For each predicted retinal atom, finds the closest experimental atom
+    and computes RMSD over these matched pairs. No additional alignment
+    is performed - coordinates should already be backbone-aligned.
+
     Args:
-        exp_ret_coords (ndarray): shape (N,3)
-        pred_ret_coords (ndarray): shape (M,3)
-        
+        exp_ret_coords (ndarray): shape (N, 3) - experimental retinal coordinates
+        pred_ret_coords (ndarray): shape (M, 3) - predicted retinal coordinates
+                                   (already transformed by backbone alignment)
+
     Returns:
-        float: mean distance over the matched pairs
+        float: RMSD over nearest-neighbor matched pairs
     """
-    # Ensure float arrays
-    exp_ret_coords = exp_ret_coords.astype(float)
-    pred_ret_coords = pred_ret_coords.astype(float)
-    
-    # If sets differ in size, we match whichever is smaller to a subset of the larger
+    exp_ret_coords = np.asarray(exp_ret_coords, dtype=float)
+    pred_ret_coords = np.asarray(pred_ret_coords, dtype=float)
+
     n_exp = len(exp_ret_coords)
     n_pred = len(pred_ret_coords)
+
     if n_exp == 0 or n_pred == 0:
-        return np.nan  # or raise an error
-    
-    # 1) Build NxM distance matrix (for experimental vs. predicted)
-    dist_mat = cdist(exp_ret_coords, pred_ret_coords)  # shape (N, M)
-    
-    # 2) If N \!= M, we only match min(N,M) pairs
-    #    We'll do the "Hungarian method" in a square matrix:
-    #    - If one set is larger, we add dummy rows or columns with 0-dist to allow linear_sum_assignment
-    #      but effectively ignoring extra atoms.
-    N = max(n_exp, n_pred)
-    # build a square cost matrix of size NxN, fill with large values
-    cost_mat = np.full((N, N), fill_value=1e6, dtype=float)
-    cost_mat[:n_exp, :n_pred] = dist_mat  # fill the top-left region
-    
-    # 3) Solve
-    row_ind, col_ind = linear_sum_assignment(cost_mat)
-    
-    # The matched pairs are the first min(n_exp, n_pred) among row_ind, col_ind
-    # but some will be dummy rows or columns if N>n_exp or N>n_pred.
-    matched_rows = []
-    matched_cols = []
-    for r, c in zip(row_ind, col_ind):
-        # only keep if r < n_exp and c < n_pred => real, not dummy
-        if r < n_exp and c < n_pred:
-            matched_rows.append(r)
-            matched_cols.append(c)
-    
-    # 4) Extract distances for those matched real pairs
-    matched_dists = dist_mat[matched_rows, matched_cols]  # shape ~ min(n_exp,n_pred)
-    
-    # 5) Return the *average* distance
-    if len(matched_dists) > 0:
-        return matched_dists.mean()
-    else:
         return np.nan
+
+    # Build distance matrix
+    dist_mat = cdist(pred_ret_coords, exp_ret_coords)  # shape (M, N)
+
+    # For each predicted atom, find the closest experimental atom
+    min_dists = np.min(dist_mat, axis=1)  # shape (M,)
+
+    # Compute RMSD
+    rmsd = np.sqrt(np.mean(min_dists ** 2))
+
+    return rmsd
 
 def find_retinal_within_cutoff(full_structure_df, chain_df, cutoff=6.0, retinal_name='RET'):
     """

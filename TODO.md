@@ -1,122 +1,65 @@
-# MOGRN Project - TODO and Status
+# MOGRN Refactoring Progress
 
-## Project Overview
-MOGRN (Microbial Opsin Generic Residue Numbering) is a comprehensive framework for analyzing, comparing, and visualizing experimental and predicted microbial opsin structures using Generic Residue Numbering (GRN) to standardize structural comparisons.
+## Completed
 
-## Recent Achievements (2025-09-03)
+### 1. Data Preparation (`prepare_data.py`)
+- [x] Switched to `mo_exp_ST1.csv` as primary property file
+- [x] Fixed Excel scientific notation parsing (e.g., `1E12` PDB ID)
+- [x] Implemented proper dataset creation with 4 datasets:
+  - **Dataset 1a (mo_exp_A)**: 42 experimental structures (Set A, pre-Sept 2021)
+  - **Dataset 1b (mo_exp_B)**: 27 experimental structures (Set B + 8 Hideaki)
+  - **Dataset 2a (mo_pred_exp)**: 71 Boltz predictions of experimental structures (63 + 8 Hideaki)
+  - **Dataset 2b (mo_pred_novel)**: 58 Boltz predictions of novel opsins
+- [x] Structure mapping (PDB ID -> prediction): 70 pairs (62 standard + 8 Hideaki)
+- [x] Hideaki structure handling with special naming convention
+- [x] Dataset validation with property mapping verification
+- [x] All datasets: 100% mapped to predictions and properties
 
-### 1. Clustered MO Structure Processing ✓
-We successfully processed a new dataset of 21 clustered microbial opsin structures:
+### 2. File Renames
+- [x] Renamed `ChR2_model_0.cif` -> `CrChR2_model_0.cif` (to match ST1 naming)
 
-- **Created**: `prepare_clustered_mo_data.py` 
-  - Loads CIF files from `structures/clustered_mo/`
-  - Uses PROTOS framework to create a dataset
-  - Extracts sequences from structures
-  - **Key Finding**: The atom naming convention differs - CA atoms are identified by `res_atom_name == 'CA'` not `atom_name == 'CA'`
+### 3. Core Files Created
+- [x] `prepare_data.py` - Data preparation with protos API
+- [x] `opsin_analysis_workflow.py` - Analysis workflow (needs update)
+- [x] `plot.py` - Visualization script (needs update)
 
-- **Created**: `clustered_mo_intermediate.json`
-  - Contains sequence data and mapping information for all 21 structures
-  - Maps MO_XXX identifiers to full organism names from `property/mo_small_name_mapping.txt`
+## In Progress
 
-### 2. Structure Alignment Pipeline ✓
-We implemented a comprehensive alignment workflow to compare clustered structures against all processed structures:
+### 4. Opsin Analysis Workflow (`opsin_analysis_workflow.py`)
+- [ ] Update to use correct protos dataset API
+- [ ] Use structure mapping from `prepare_data.py` output
+- [ ] Integrate with new dataset structure (1a, 1b, 2a, 2b)
+- [ ] Fix data loading to work with registered datasets
+- [ ] Update error calculation for exp vs pred comparison
+- [ ] Update helix annotation pipeline
+- [ ] Update RMSD matrix calculation
+- [ ] Update GRN assignment
 
-- **Created**: `align_clustered_mo_step_by_step.py`
-  - Performs N×M alignment matrix (21 clustered × 199 processed structures)
-  - Uses multiple alignment strategies:
-    1. Direct RMSD calculation for same-length sequences
-    2. Truncated alignment for different lengths
-    3. Sequence-based alignment as fallback
-  - Successfully aligned all 21 structures with valid RMSD values
+## Pending
 
-- **Results**: 
-  - `clustered_mo_alignment_results_v2.json` - Contains best matches and all pairwise RMSDs
-  - `clustered_mo_rmsd_matrix_v2.csv` - Full RMSD matrix (21×199)
-  - Most clustered structures best match with `S13_Bin138_Proteo_SR_model_0`
-  - RMSD values range from ~10-14 Å (reasonable for these structures)
+### 5. Plot Script (`plot.py`)
+- [ ] Update to use new workflow outputs
+- [ ] Verify all visualizations work with new data structure
 
-### 3. Visualization Pipeline (In Progress)
-Started implementing visualization of alignments using PROTOS visualization capabilities:
+### 6. Testing & Validation
+- [ ] Run full workflow end-to-end
+- [ ] Verify RMSD calculations
+- [ ] Verify GRN assignments
+- [ ] Generate paper figures
 
-- **Created**: `visualize_clustered_alignments.py`
-  - Loads alignment results and structures
-  - Implements proper GRN filtering for processed structures
-  - Applies rotation/translation transformations for alignment visualization
-  - Creates both individual alignment visualizations and overview plots
+## Dataset Summary
 
-**Current Issues**:
-- Dataset loading path issues between different environments
-- Need to ensure proper coordinate transformation is applied
+| Dataset | Name | Count | Description |
+|---------|------|-------|-------------|
+| 1a | mo_exp_A | 42 | Experimental Set A (pre-Sept 2021, in Boltz training) |
+| 1b | mo_exp_B | 27 | Experimental Set B (post-Sept 2021) + Hideaki exp |
+| 2a | mo_pred_exp | 71 | Boltz predictions of experimental (63 + 8 Hideaki) |
+| 2b | mo_pred_novel | 58 | Boltz predictions of novel opsins |
 
-## Key Technical Details
+## Key Files
 
-### Structure Data Format
-- Clustered structures use different atom naming:
-  - `atom_name` contains element symbols (C, N, O, S)
-  - `res_atom_name` contains atom names (CA, CB, CG, etc.)
-  - Must use `res_atom_name == 'CA'` to identify C-alpha atoms
-
-### Alignment Approach
-1. Filter structures by chain A
-2. Extract CA atoms only
-3. For processed structures: filter by GRN (remove residues without valid GRN)
-4. Use QCPSuperimposer for optimal superposition
-5. Apply transformation: `coords_transformed = coords @ rotation + translation`
-
-### Property Table Requirements
-The goal is to create `property/mo_clustered.csv` with same format as `mo_exp.csv`:
-- Sequence information
-- Organism/species (extracted from mapping file)
-- Molecular function (inferred from best match)
-- Structure metadata
-- Alignment quality metrics
-
-## Next Steps
-
-### Immediate Tasks
-1. [ ] Fix visualization script path issues
-2. [ ] Complete property table generation with alignment-based function inference
-3. [ ] Generate publication-quality alignment visualizations
-4. [ ] Create summary statistics and analysis
-
-### Analysis Goals
-1. [ ] Determine functional classification of clustered structures based on best matches
-2. [ ] Identify novel structural features or variations
-3. [ ] Analyze distribution of RMSD values to understand structural diversity
-4. [ ] Create phylogenetic/similarity tree based on structural alignment
-
-### Documentation
-1. [ ] Document the complete workflow for reproducibility
-2. [ ] Create figure legends for visualizations
-3. [ ] Summarize biological insights from structural comparisons
-
-## File Structure Summary
-
-```
-clustered_mo_analysis/
-├── Input Data
-│   ├── structures/clustered_mo/*.cif (21 structures)
-│   └── property/mo_small_name_mapping.txt
-│
-├── Processing Scripts
-│   ├── prepare_clustered_mo_data.py
-│   ├── align_clustered_mo_step_by_step.py
-│   └── visualize_clustered_alignments.py
-│
-├── Results
-│   ├── clustered_mo_intermediate.json
-│   ├── clustered_mo_alignment_results_v2.json
-│   ├── clustered_mo_rmsd_matrix_v2.csv
-│   └── property/mo_clustered.csv (to be generated)
-│
-└── Visualizations
-    └── opsin_output/clustered/ (to be populated)
-```
-
-## Success Metrics
-- ✓ All 21 structures successfully loaded and processed
-- ✓ 100% alignment success rate (21/21 structures aligned)
-- ✓ All structures have identified best matches
-- [ ] Property table generated with complete annotations
-- [ ] Visualizations created for top alignments
-- [ ] Biological insights documented
+- `property/mo_exp_ST1.csv` - Primary property file (134 entries)
+- `opsin_output/structure_mapping.json` - PDB ID -> prediction mapping (70 pairs)
+- `structures/mo_pred/` - Prediction CIF files (121)
+- `structures/hideaki_exp/` - Hideaki experimental (8)
+- `structures/hideaki_pred/` - Hideaki predictions (8)

@@ -14,7 +14,7 @@ opsin_output
 mock_data
 rotation_frontview_1080
 animation
-literature_review.md
+literature_review.txt
 novel_targets.txt
 PRELIMINARY_RESULTS.md
 
@@ -33,3 +33,13 @@ mo_clusters
 outputs
 paper
 papers
+
+# Large generated HTML files
+overview_*.html
+docs/*.html
+
+# Python cache
+*.pyc
+*.pyo
+
+zenodo_upload
