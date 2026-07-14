@@ -62,6 +62,7 @@ from src.structure_comparison import (
 from src.helix_analysis import load_and_apply_helix_annotations
 from src.assign_grns import align_and_assign_grn
 from src.lyr_processing import process_lyr_in_processor_data, standardize_retinal_naming
+from src.tandem_structure_preprocessing import dataset_signature
 
 
 # =============================================================================
@@ -95,6 +96,15 @@ def load_structure_mapping() -> Dict[str, str]:
         with open(mapping_file) as f:
             return json.load(f)
     return {}
+
+
+def load_tandem_structure_manifest() -> Dict[str, Any]:
+    """Load the external preprocessing manifest written by prepare_data.py."""
+    manifest_file = OUTPUT_DIR / "tandem_structure_preprocessing.json"
+    if not manifest_file.exists():
+        return {}
+    with manifest_file.open() as handle:
+        return json.load(handle)
 
 
 def load_property_data(property_file: Path = None) -> pd.DataFrame:
@@ -167,22 +177,40 @@ def load_structures_from_datasets(
     # Cache file for processed structures
     cache_file = cache_dir / f"processed_structures_{chain_id}.pkl"
 
+    # Resolve current dataset contents before consulting the cache.  A changed
+    # preprocessing split must invalidate every downstream stage automatically.
+    processor = StructureProcessor("mogrn_workflow")
+    dataset_contents = {}
+    for dataset_name in datasets:
+        if not processor.dataset_manager.dataset_exists(dataset_name):
+            continue
+        dataset_contents[dataset_name] = processor.get_dataset_entities(dataset_name)
+    input_signature = dataset_signature(
+        dataset_contents,
+        chain_id=chain_id,
+        retinal_name=retinal_name,
+        preprocessing_signature=load_tandem_structure_manifest().get(
+            "config_sha256"
+        ),
+    )
+
     # Try loading from cache
     if use_cache and cache_file.exists():
         print(f"[INFO] Loading from cache: {cache_file}")
         try:
             with open(cache_file, "rb") as f:
                 cached_data = pickle.load(f)
-            if "processed_structures" in cached_data:
+            if (
+                "processed_structures" in cached_data
+                and cached_data.get("_dataset_signature") == input_signature
+            ):
                 print(f"[INFO] Loaded {len(cached_data['processed_structures'])} structures from cache")
                 return cached_data
+            print("[INFO] Ignoring stale processed-structure cache")
         except Exception as e:
             print(f"[WARN] Failed to load cache: {e}")
 
-    # Initialize StructureProcessor (new protos API)
-    processor = StructureProcessor("mogrn_workflow")
     all_structures = {}
-    dataset_contents = {}
 
     for dataset_name in datasets:
         print(f"\n[INFO] Loading dataset: {dataset_name}")
@@ -191,10 +219,9 @@ def load_structures_from_datasets(
             print(f"[WARN] Dataset not found: {dataset_name}")
             continue
 
-        # Get structure IDs from dataset
-        structure_ids = processor.get_dataset_entities(dataset_name)
+        # Get structure IDs from the dataset snapshot used for the cache key.
+        structure_ids = dataset_contents[dataset_name]
         print(f"[INFO] Found {len(structure_ids)} structures in {dataset_name}")
-        dataset_contents[dataset_name] = structure_ids
 
         # Load structures using new API
         loaded_count = 0
@@ -355,6 +382,7 @@ def load_structures_from_datasets(
         "cp_mo_pred": cp_mo_pred,
         "cp_hide_exp": cp_hide_exp,
         "cp_hide_pred": cp_hide_pred,
+        "_dataset_signature": input_signature,
     }
 
     # Save to cache
@@ -459,6 +487,7 @@ def run_opsin_analysis_workflow(
 
     property_df = load_property_data()
     print(f"[INFO] Loaded {len(property_df)} property entries")
+    tandem_manifest = load_tandem_structure_manifest()
 
     # Create property lookup for structures
     property_data = {
@@ -489,6 +518,15 @@ def run_opsin_analysis_workflow(
                 pred_id = str(short_name).strip() + "_model_0"
                 property_data["properties"][pred_id] = props
 
+    # Virtual tandem domains inherit the metadata of the parent structure.
+    property_lookup = {
+        str(key).lower(): key for key in property_data["properties"]
+    }
+    for child_id, parent_id in tandem_manifest.get("entity_parents", {}).items():
+        parent_key = property_lookup.get(str(parent_id).lower())
+        if parent_key is not None:
+            property_data["properties"][child_id] = property_data["properties"][parent_key]
+
     # Update processed structures with properties
     for struct_id, struct_data in data["processed_structures"].items():
         if struct_id in property_data["properties"]:
@@ -500,13 +538,18 @@ def run_opsin_analysis_workflow(
     print("-" * 60)
 
     errors_cache = cache_dir / f"structure_errors_{chain_id}.pkl"
+    input_signature = data.get("_dataset_signature")
 
     if use_cache and errors_cache.exists():
         print(f"[INFO] Loading errors from cache: {errors_cache}")
         try:
             with open(errors_cache, "rb") as f:
                 errors_data = pickle.load(f)
-            data.update(errors_data)
+            if errors_data.get("_dataset_signature") == input_signature:
+                data.update(errors_data)
+            else:
+                print("[INFO] Ignoring stale structure-error cache")
+                errors_data = None
         except Exception as e:
             print(f"[WARN] Failed to load cache: {e}")
             errors_data = None
@@ -516,6 +559,7 @@ def run_opsin_analysis_workflow(
     if errors_data is None:
         try:
             errors_data = calculate_structure_errors(data, output_dir=str(output_dir), visualize=visualize)
+            errors_data["_dataset_signature"] = input_signature
             data.update(errors_data)
 
             if use_cache:
@@ -549,7 +593,11 @@ def run_opsin_analysis_workflow(
         try:
             with open(comparison_cache, "rb") as f:
                 comparison_data = pickle.load(f)
-            data.update(comparison_data)
+            if comparison_data.get("_dataset_signature") == input_signature:
+                data.update(comparison_data)
+            else:
+                print("[INFO] Ignoring stale structure-comparison cache")
+                comparison_data = None
         except Exception as e:
             print(f"[WARN] Failed to load cache: {e}")
             comparison_data = None
@@ -561,6 +609,7 @@ def run_opsin_analysis_workflow(
             comparison_data = compare_structures(
                 data, str(output_dir), visualize=visualize
             )
+            comparison_data["_dataset_signature"] = input_signature
             data.update(comparison_data)
 
             if use_cache:
@@ -582,7 +631,11 @@ def run_opsin_analysis_workflow(
         try:
             with open(grn_cache, "rb") as f:
                 grn_data = pickle.load(f)
-            data.update(grn_data)
+            if grn_data.get("_dataset_signature") == input_signature:
+                data.update(grn_data)
+            else:
+                print("[INFO] Ignoring stale GRN cache")
+                grn_data = None
         except Exception as e:
             print(f"[WARN] Failed to load cache: {e}")
             grn_data = None
@@ -598,6 +651,7 @@ def run_opsin_analysis_workflow(
                 global_ref_override=global_ref_override,
                 helices_file=helices_file,
             )
+            grn_data["_dataset_signature"] = input_signature
             data.update(grn_data)
 
             if use_cache:
@@ -620,6 +674,9 @@ def run_opsin_analysis_workflow(
             "chain_id": chain_id,
             "timestamp": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S"),
             "cache_enabled": use_cache,
+            "tandem_domain_entities": sorted(
+                tandem_manifest.get("entity_parents", {})
+            ),
         }
 
         with open(output_dir / "analysis_summary.json", "w") as f:

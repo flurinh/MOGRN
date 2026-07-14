@@ -33,6 +33,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 DATA_ROOT = PROJECT_ROOT / "data"
 PROPERTY_DIR = PROJECT_ROOT / "property"
 OUTPUT_DIR = PROJECT_ROOT / "opsin_output"
+SRC_DIR = PROJECT_ROOT / "src"
 
 # Structure directories (CIF files are spread across subdirectories)
 # NOTE: clustered_mo is excluded - not part of this analysis
@@ -57,12 +58,20 @@ protos.set_data_path(str(DATA_ROOT))
 
 from protos.processing.structure import StructureProcessor
 from protos.io.ingest.structure_loader import StructureLoader
+from src.tandem_structure_preprocessing import (
+    apply_structure_replacements,
+    expand_structure_mapping,
+    preprocess_registered_tandem_structures,
+    update_tandem_helix_definitions,
+)
 
 # =============================================================================
 # Configuration
 # =============================================================================
 
 PROPERTY_FILE = PROPERTY_DIR / "mo_exp_ST1.csv"
+TANDEM_STRUCTURE_CONFIG = SRC_DIR / "resources" / "tandem_structure_domains.json"
+TANDEM_STRUCTURE_MANIFEST = OUTPUT_DIR / "tandem_structure_preprocessing.json"
 
 # Dataset definitions based on the split logic:
 #
@@ -393,7 +402,8 @@ def create_datasets(
     processor: StructureProcessor,
     property_df: pd.DataFrame,
     available_structures: Dict[str, Path],
-    force: bool = False
+    force: bool = False,
+    structure_replacements: Dict[str, Tuple[str, ...]] = None,
 ) -> Dict[str, int]:
     """Create the 4 datasets based on property filters."""
     print("\n" + "=" * 60)
@@ -401,19 +411,12 @@ def create_datasets(
     print("=" * 60)
 
     available_set = set(available_structures.keys())
+    structure_replacements = structure_replacements or {}
     results = {}
     created_datasets = {}  # Store content of created datasets for complement logic
 
     for dataset_name, config in DATASET_CONFIGS.items():
         print(f"\n[INFO] Processing dataset: {dataset_name}")
-
-        # Check if dataset exists
-        if not force and processor.dataset_manager.dataset_exists(dataset_name):
-            existing = processor.dataset_manager.get_dataset_entities(dataset_name)
-            print(f"[INFO] Dataset exists with {len(existing)} entities (use --rebuild to recreate)")
-            results[dataset_name] = len(existing)
-            created_datasets[dataset_name] = existing
-            continue
 
         # Build content list
         content = []
@@ -453,15 +456,24 @@ def create_datasets(
                         content.append(struct_id)
                 print(f"[INFO]   Added {len(hideaki_ids)} Hideaki structures from {hideaki_source}")
 
+        content = apply_structure_replacements(content, structure_replacements)
+        content = [structure_id for structure_id in content if structure_id in available_set]
+
         if not content:
             print(f"[WARN] No structures found for dataset: {dataset_name}")
             results[dataset_name] = 0
             continue
 
-        # Delete existing if rebuilding
-        if force and processor.dataset_manager.dataset_exists(dataset_name):
+        # Reconcile existing datasets when preprocessing changes entity IDs.
+        if processor.dataset_manager.dataset_exists(dataset_name):
+            existing = processor.dataset_manager.get_dataset_entities(dataset_name)
+            if not force and list(existing) == content:
+                print(f"[INFO] Dataset is current with {len(existing)} entities")
+                results[dataset_name] = len(existing)
+                created_datasets[dataset_name] = existing
+                continue
             processor.dataset_manager.delete_dataset(dataset_name)
-            print(f"[INFO] Deleted existing dataset: {dataset_name}")
+            print(f"[INFO] Replacing stale dataset: {dataset_name}")
 
         # Create dataset
         try:
@@ -484,7 +496,11 @@ def create_datasets(
 # Main
 # =============================================================================
 
-def main(rebuild: bool = False, download: bool = False):
+def main(
+    rebuild: bool = False,
+    download: bool = False,
+    preprocess_tandem: bool = True,
+):
     """Main entry point for data preparation.
 
     Args:
@@ -526,11 +542,46 @@ def main(rebuild: bool = False, download: bool = False):
     # Register structures
     register_structures(processor, loader, available_structures, force=rebuild)
 
+    tandem_result = None
+    structure_replacements = {}
+    entity_parents = {}
+    if preprocess_tandem:
+        print("\n[INFO] Preprocessing configured tandem-domain structures...")
+        tandem_result = preprocess_registered_tandem_structures(
+            processor,
+            list(available_structures),
+            TANDEM_STRUCTURE_CONFIG,
+        )
+        structure_replacements = tandem_result.replacements
+        entity_parents = tandem_result.entity_parents
+        for child_id in entity_parents:
+            available_structures[child_id] = TANDEM_STRUCTURE_CONFIG
+        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        with TANDEM_STRUCTURE_MANIFEST.open("w") as handle:
+            json.dump(tandem_result.as_manifest(), handle, indent=2)
+        update_tandem_helix_definitions(
+            PROPERTY_DIR / "helices_grn.json",
+            tandem_result.records,
+        )
+        print(
+            f"[INFO] Registered {len(entity_parents)} virtual tandem domains; "
+            f"manifest: {TANDEM_STRUCTURE_MANIFEST}"
+        )
+
     # Create datasets
-    dataset_counts = create_datasets(processor, property_df, available_structures, force=rebuild)
+    dataset_counts = create_datasets(
+        processor,
+        property_df,
+        available_structures,
+        force=rebuild,
+        structure_replacements=structure_replacements,
+    )
 
     # Create and save structure mapping (exp_id -> pred_id)
     structure_mapping = create_structure_mapping(property_df, available_structures)
+    structure_mapping = expand_structure_mapping(
+        structure_mapping, structure_replacements
+    )
 
     # Save mapping to JSON
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -591,15 +642,16 @@ def main(rebuild: bool = False, download: bool = False):
             # Check prediction mapping
             if entity_id in structure_mapping:
                 mapped_to_pred += 1
-            elif entity_id.endswith("_model_0"):
+            elif "_model_0" in entity_id:
                 # Predictions don't need prediction mapping
                 mapped_to_pred += 1
 
             # Check property mapping
             has_props = False
-            if entity_id in property_by_pdb:
+            property_entity_id = entity_parents.get(entity_id, entity_id)
+            if property_entity_id in property_by_pdb:
                 has_props = True
-            elif entity_id in property_by_pred:
+            elif property_entity_id in property_by_pred:
                 has_props = True
             elif entity_id in hideaki_to_short:
                 short = hideaki_to_short[entity_id]
@@ -633,9 +685,10 @@ def main(rebuild: bool = False, download: bool = False):
             unmapped = []
             for entity_id in entities:
                 has_props = False
-                if entity_id in property_by_pdb:
+                property_entity_id = entity_parents.get(entity_id, entity_id)
+                if property_entity_id in property_by_pdb:
                     has_props = True
-                elif entity_id in property_by_pred:
+                elif property_entity_id in property_by_pred:
                     has_props = True
                 elif entity_id in hideaki_to_short:
                     short = hideaki_to_short[entity_id]
@@ -674,6 +727,9 @@ def main(rebuild: bool = False, download: bool = False):
         "available_structures": available_structures,
         "dataset_counts": dataset_counts,
         "structure_mapping": structure_mapping,
+        "tandem_structure_preprocessing": (
+            tandem_result.as_manifest() if tandem_result is not None else None
+        ),
         "dataset_details": dataset_details,
     }
 
@@ -682,6 +738,15 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Prepare MOGRN data and register datasets")
     parser.add_argument("--rebuild", action="store_true", help="Force rebuild of existing datasets")
     parser.add_argument("--download", action="store_true", help="Download missing experimental structures from RCSB")
+    parser.add_argument(
+        "--skip-tandem-preprocessing",
+        action="store_true",
+        help="Do not replace configured long-chain tandem structures",
+    )
     args = parser.parse_args()
 
-    main(rebuild=args.rebuild, download=args.download)
+    main(
+        rebuild=args.rebuild,
+        download=args.download,
+        preprocess_tandem=not args.skip_tandem_preprocessing,
+    )

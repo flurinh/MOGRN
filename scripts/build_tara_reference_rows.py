@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """Build and validate separate TARA R1/R2 reference rows.
 
-R1 contains the manuscript-described TM5 pi-bulge.  Broad structural consensus
-places W184--W186 at 5.40--5.42, a gap at 5.43, Y187 at 5.44, A188 at 5.45,
-the bulged I189 at 5.451, and F190 at the downstream 5.46 anchor.  R2 retains
-the standard register and has a gap only at the R1-specific column 5.451.
+R1 contains the manuscript-described TM5 pi-bulge.  Its hand-curated register
+treats the helix as one ordinary position shorter at its N-terminal end: 5.40
+is empty, W184--A188 occupy 5.41--5.45, the bulged I189 occupies 5.451, and
+F190 remains at the downstream 5.46 anchor.  R2 retains the standard register
+and has a gap only at the R1-specific column 5.451.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -20,6 +22,18 @@ ROOT = Path(__file__).resolve().parent.parent
 PROTOS_SRC = ROOT / "protos" / "src"
 if PROTOS_SRC.exists():
     sys.path.insert(0, str(PROTOS_SRC))
+
+
+TARA_A_TM5_REGISTER = {
+    "5.40": "-",
+    "5.41": "W184",
+    "5.42": "M185",
+    "5.43": "W186",
+    "5.44": "Y187",
+    "5.45": "A188",
+    "5.451": "I189",
+    "5.46": "F190",
+}
 
 
 def add_after(columns: list[str], existing: str, new: str) -> list[str]:
@@ -47,6 +61,71 @@ def alias_structure(processor, source_id: str, target_id: str) -> None:
     )
 
 
+def apply_tara_a_tm5_register(row: pd.Series) -> pd.Series:
+    """Apply the curated continuous TARA_A register around the 5.451 bulge."""
+
+    corrected = row.copy()
+    missing = set(TARA_A_TM5_REGISTER).difference(corrected.index)
+    if missing:
+        raise ValueError(f"TARA_A row is missing TM5 columns: {sorted(missing)}")
+    for grn, residue in TARA_A_TM5_REGISTER.items():
+        corrected[grn] = residue
+
+    residues = [
+        corrected[grn]
+        for grn in TARA_A_TM5_REGISTER
+        if corrected[grn] != "-"
+    ]
+    expected = ["W184", "M185", "W186", "Y187", "A188", "I189", "F190"]
+    if residues != expected or len(residues) != len(set(residues)):
+        raise ValueError(f"Invalid TARA_A TM5 register: {residues}")
+    return corrected
+
+
+def _write_json_atomic(path: Path, payload: dict) -> None:
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    temporary.replace(path)
+
+
+def sync_runtime_reference(candidate: pd.DataFrame) -> str:
+    """Restore validated MOGRN copies after Protos bundle initialization."""
+
+    paths = [
+        ROOT / "data" / "grn" / "reference" / "type_I.csv",
+        ROOT / "data" / "grn" / "reference" / "type_I_opsins.csv",
+        ROOT / "data" / "grn" / "reference" / "type_I_with_tara_domains.csv",
+        ROOT / "opsin_output" / "curated_grn_postprocessed.csv",
+        ROOT / "opsin_output" / "dual_rhodopsins" / "type_I_with_tara_domains.csv",
+    ]
+    paper_copy = ROOT / "opsin_output" / "paper_figures" / "type_I_opsins.csv"
+    if paper_copy.parent.exists():
+        paths.append(paper_copy)
+    for path in paths:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        candidate.to_csv(path)
+
+    digest = hashlib.sha256(paths[0].read_bytes()).hexdigest()
+    manifest_path = ROOT / "data" / "grn" / "manifest.json"
+    if manifest_path.exists():
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["bundle_version"] = "2026.07.14"
+        manifest["files"]["type_I_opsins.csv"] = digest
+        _write_json_atomic(manifest_path, manifest)
+
+    provenance_path = ROOT / "data" / "grn" / "opsin_provenance.json"
+    if provenance_path.exists():
+        provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+        provenance["type_I"]["policy"] = (
+            "Retain the curated microbial type-I opsin table, including approved "
+            "manual TARA_A, PsChR2, and continuous HulaCCR1 register corrections."
+        )
+        provenance["type_I"]["source_table_sha256"] = digest
+        provenance["files"]["type_I_opsins.csv"] = digest
+        _write_json_atomic(provenance_path, provenance)
+    return digest
+
+
 def main() -> int:
     output = ROOT / "opsin_output" / "dual_rhodopsins"
     source_path = ROOT / "type_I.csv"
@@ -63,7 +142,7 @@ def main() -> int:
 
     tara_a = split.loc["7pl9_A"].reindex(columns, fill_value="-").copy()
     tara_b = split.loc["7pl9_B"].reindex(columns, fill_value="-").copy()
-    # Restore the R1 pi-bulge register described in manuscript.md.
+    # Confirm the uncurated Protos register before applying the manual shift.
     expected_r1_register = {
         "4.62": "T183",
         "5.40": "W184",
@@ -75,11 +154,7 @@ def main() -> int:
         "5.46": "F190",
     }
     assert all(tara_a[grn] == residue for grn, residue in expected_r1_register.items())
-    tara_a["5.43"] = "-"
-    tara_a["5.44"] = "Y187"
-    tara_a["5.45"] = "A188"
-    tara_a["5.451"] = "I189"
-    tara_a["5.46"] = "F190"
+    tara_a = apply_tara_a_tm5_register(tara_a)
     tara_b["5.451"] = "-"
     candidate.loc["TARA_A"] = tara_a
     candidate.loc["TARA_B"] = tara_b
@@ -149,9 +224,12 @@ def main() -> int:
         )
     qc_table = pd.DataFrame(qc)
     qc_table.to_csv(output / "tara_reference_roundtrip_qc.csv", index=False)
+    success = (qc_table["tm_roundtrip_differences"] == 0).all()
+    digest = sync_runtime_reference(candidate) if success else "not-synchronized"
     print(qc_table.to_string(index=False))
     print(f"Candidate reference: {candidate_path}")
-    return 0 if (qc_table["tm_roundtrip_differences"] == 0).all() else 1
+    print(f"Runtime reference SHA-256: {digest}")
+    return 0 if success else 1
 
 
 if __name__ == "__main__":
