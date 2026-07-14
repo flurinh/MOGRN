@@ -22,8 +22,11 @@ Data folders included in the archive:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import pathlib
+import shutil
+import stat
 import sys
 import urllib.error
 import urllib.request
@@ -117,16 +120,62 @@ def download_file(
             progress.close()
 
 
+def verify_checksum(path: pathlib.Path, checksum: str | None) -> None:
+    """Verify a Zenodo checksum such as ``md5:<digest>`` when supplied."""
+    if not checksum:
+        return
+    try:
+        algorithm, expected = checksum.split(":", 1)
+        digest = hashlib.new(algorithm.lower())
+    except (ValueError, TypeError) as exc:
+        raise ValueError(f"Invalid archive checksum declaration: {checksum!r}") from exc
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    if digest.hexdigest().lower() != expected.lower():
+        raise ValueError(
+            f"Checksum mismatch for {path.name}: expected {checksum}, "
+            f"observed {algorithm}:{digest.hexdigest()}"
+        )
+
+
+def _safe_destination(output_dir: pathlib.Path, member: zipfile.ZipInfo) -> pathlib.Path:
+    """Resolve a zip member and reject traversal, absolute paths, and symlinks."""
+    if "\\" in member.filename:
+        raise ValueError(f"Unsafe archive member path: {member.filename!r}")
+    member_path = pathlib.PurePosixPath(member.filename)
+    if (
+        member_path.is_absolute()
+        or ".." in member_path.parts
+        or (member_path.parts and member_path.parts[0].endswith(":"))
+    ):
+        raise ValueError(f"Unsafe archive member path: {member.filename!r}")
+    file_type = (member.external_attr >> 16) & 0o170000
+    if file_type == stat.S_IFLNK:
+        raise ValueError(f"Refusing archive symbolic link: {member.filename!r}")
+    root = output_dir.resolve()
+    destination = (root / pathlib.Path(*member_path.parts)).resolve()
+    if destination != root and root not in destination.parents:
+        raise ValueError(f"Archive member escapes output directory: {member.filename!r}")
+    return destination
+
+
 def extract_archive(archive_path: pathlib.Path, output_dir: pathlib.Path) -> None:
-    """Extract a zip archive to the output directory."""
+    """Safely extract a zip archive to the output directory."""
     print(f"Extracting {archive_path.name}...")
     with zipfile.ZipFile(archive_path, "r") as zip_ref:
         members = zip_ref.namelist()
+        iterator = zip_ref.infolist()
         if tqdm is not None:
-            for member in tqdm(members, desc="Extracting", unit="files"):
-                zip_ref.extract(member, output_dir)
-        else:
-            zip_ref.extractall(output_dir)
+            iterator = tqdm(iterator, desc="Extracting", unit="files")
+        for member in iterator:
+            destination = _safe_destination(output_dir, member)
+            if member.is_dir():
+                destination.mkdir(parents=True, exist_ok=True)
+                continue
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            with zip_ref.open(member) as source, destination.open("wb") as target:
+                shutil.copyfileobj(source, target, length=1024 * 1024)
     print(f"Extracted {len(members)} files to {output_dir}")
 
 
@@ -186,6 +235,7 @@ def download_and_extract(
             total_size=int(file_info.get("size") or 0) or None,
             label=archive_name,
         )
+        verify_checksum(archive_path, file_info.get("checksum"))
     except urllib.error.URLError as exc:
         raise RuntimeError(f"Failed to download {archive_name}: {exc}") from exc
 
