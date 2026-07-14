@@ -1,0 +1,23 @@
+cff-version: 1.2.0
+message: "If you use MOGRN, please cite the software and the associated manuscript."
+title: "MOGRN: Microbial Opsin Generic Residue Numbering"
+type: software
+authors:
+  - family-names: Hidber
+    given-names: Flurin
+repository-code: "https://github.com/flurinh/MOGRN"
+url: "https://rhodo.psi.ch/"
+abstract: >-
+  MOGRN is a structure-guided generic residue-numbering and comparative-analysis
+  workflow for type-I microbial opsins.
+keywords:
+  - microbial rhodopsin
+  - generic residue numbering
+  - structural bioinformatics
+  - retinal
+preferred-citation:
+  type: article
+  title: "A Generic Residue-Numbering System for Microbial Rhodopsins"
+  authors:
+    - family-names: Hidber
+      given-names: Flurin

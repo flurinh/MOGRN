@@ -1,45 +1,60 @@
-.ipynb_checkpoints
-data
-deprecated
-examples
-structures
-yaml_configs
-opsin_output
-all_structs_old
-__pycache__
-property
-protos
-opsin_output
-.idea
-mock_data
-rotation_frontview_1080
-animation
-literature_review.txt
-novel_targets.txt
-PRELIMINARY_RESULTS.md
+# Python environments and caches
+.venv/
+venv/
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.py[cod]
 
-.claude
+# Editors and operating-system files
+.idea/
+.vscode/
+.ipynb_checkpoints/
+.DS_Store
+
+# Local agent/coordinator state
+.local/
+.claude/
 claude/
 CLAUDE.md
+graphify-out/
+remote_requests.md
 
-paper/
-manuscript.txt
+# External inputs and Protos runtime state
+data/
+structures/
+property/
+yaml_configs/
+protos/
+mock_data/
 
-bonded
-flat_new_opsins_outputs
-flat_outputs
-new_opsins_outputs
-mo_clusters
-outputs
-paper
-papers
+# Generated analysis and prediction outputs
+opsin_output/
+outputs/
+new_opsins_outputs/
+flat_outputs/
+flat_new_opsins_outputs/
+bonded/
+all_structs_old/
+rotation_frontview_1080/
+animation/
+zenodo_upload/
+mo_clusters/
 
-# Large generated HTML files
+# Generated reports and figures
+*.log
 overview_*.html
 docs/*.html
+rmsd_heatmap_legends.png
 
-# Python cache
-*.pyc
-*.pyo
-
-zenodo_upload
+# Local manuscript and working-table files
+paper/
+papers/
+manuscript.md
+manuscript.txt
+figures.md
+colorscales.yaml
+todo_*.md
+mo_exp_ST*.csv
+mo_exp_ST*.xlsx
