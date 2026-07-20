@@ -1,0 +1,16 @@
+{
+  "aliases": {
+    "8rso": {
+      "source_structure_id": "7avn",
+      "position_mapping": "sequence_alignment"
+    },
+    "9j7w": {
+      "source_structure_id": "knchr_j444_refine5",
+      "position_mapping": "sequence_alignment"
+    },
+    "9jws": {
+      "source_structure_id": "hwmr_model_0",
+      "position_mapping": "sequence_alignment"
+    }
+  }
+}

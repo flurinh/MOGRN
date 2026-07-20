@@ -126,6 +126,7 @@ def preprocess_registered_tandem_structures(
                     "parent_structure": parent_id,
                     "structure": child_id,
                     "domain": str(domain["label"]),
+                    "curated_reference_id": domain.get("curated_reference_id"),
                     "parent_chain": chain,
                     "parent_ordinal_start": start,
                     "parent_ordinal_end": end,

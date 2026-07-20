@@ -217,7 +217,7 @@ def main():
 
     # Paths
     cache_dir = PROJECT_ROOT / "opsin_output" / "cache"
-    grn_file = PROJECT_ROOT / "opsin_output" / "curated_grn_postprocessed.csv"
+    grn_file = PROJECT_ROOT / "opsin_output" / "grn_reference.csv"
     output_dir = PROJECT_ROOT / "opsin_output" / "misalignment_analysis"
     output_dir.mkdir(exist_ok=True)
 

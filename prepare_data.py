@@ -4,7 +4,7 @@ Data preparation script for MOGRN (Microbial Opsin Generic Residue Numbering).
 
 This script:
 1. Initializes protos with the project data directory
-2. Loads opsin property metadata from CSV
+2. Loads the current ST5 opsin property workbook
 3. Registers available structure files (CIF) with protos
 4. Creates 4 datasets:
    - mo_exp_A: Experimental structures pre-Sept 2021 (within Boltz training window)
@@ -64,12 +64,14 @@ from src.tandem_structure_preprocessing import (
     preprocess_registered_tandem_structures,
     update_tandem_helix_definitions,
 )
+from src.property_data import load_st5_property_data
 
 # =============================================================================
 # Configuration
 # =============================================================================
 
-PROPERTY_FILE = PROPERTY_DIR / "mo_exp_ST1.csv"
+PROPERTY_FILE = PROJECT_ROOT / "mo_exp_ST5_HEK1.xlsx"
+LEGACY_PROPERTY_FILE = PROPERTY_DIR / "mo_exp_ST1.csv"
 TANDEM_STRUCTURE_CONFIG = SRC_DIR / "resources" / "tandem_structure_domains.json"
 TANDEM_STRUCTURE_MANIFEST = OUTPUT_DIR / "tandem_structure_preprocessing.json"
 
@@ -89,6 +91,12 @@ TANDEM_STRUCTURE_MANIFEST = OUTPUT_DIR / "tandem_structure_preprocessing.json"
 
 # Hideaki short_names in mo_exp.csv - these map to hideaki_exp/hideaki_pred (different naming)
 HIDEAKI_SHORT_NAMES = {'A1ACR1', 'ChroME2s', 'CnChR2', 'CoChR', 'KnChR', 'R2ACR', 'TsChR', 'bReaChES'}
+
+
+def hideaki_short_name(structure_id: str) -> str:
+    """Return the ST5 short name encoded in a collaborator structure ID."""
+
+    return str(structure_id).split("_J", 1)[0]
 
 
 def is_hideaki_entry(row) -> bool:
@@ -147,74 +155,8 @@ DATASET_CONFIGS = {
 # =============================================================================
 
 def load_property_data(property_file: Path = PROPERTY_FILE) -> pd.DataFrame:
-    """Load and clean the opsin property CSV."""
-    print(f"[INFO] Loading property data from: {property_file}")
-
-    if not property_file.exists():
-        raise FileNotFoundError(f"Property file not found: {property_file}")
-
-    # Read with dtype=str for PDB ID to avoid scientific notation parsing (e.g., 1E12 -> 1.00E+12)
-    df = pd.read_csv(property_file, dtype={"PDB ID": str})
-    print(f"[INFO] Loaded {len(df)} entries from property file")
-
-    df.columns = df.columns.str.strip()
-
-    # Clean up dataset_split column
-    if "dataset_split" in df.columns:
-        df["dataset_split"] = df["dataset_split"].fillna("unknown").astype(str).str.strip()
-    else:
-        df["dataset_split"] = "unknown"
-
-    # Fix Excel scientific notation issue (e.g., 1E12 -> 1.00E+12)
-    # PDB IDs are always 4 characters
-    if "PDB ID" in df.columns:
-        def fix_pdb_id(val):
-            if pd.isna(val):
-                return val
-            s = str(val).strip()
-            # Check for scientific notation pattern like "1.00E+12" which should be "1E12"
-            if "E+" in s.upper() or "E-" in s.upper():
-                # Extract the base and exponent, reconstruct as PDB ID
-                import re
-                match = re.match(r"(\d+)\.?\d*[Ee][+]?(\d+)", s)
-                if match:
-                    base = match.group(1)
-                    exp = match.group(2)
-                    return f"{base}E{exp}"
-            return s
-        df["PDB ID"] = df["PDB ID"].apply(fix_pdb_id)
-
-    # Create structure IDs for both experimental (PDB ID) and predicted (short_name + _model_0)
-    def get_exp_structure_id(row):
-        """Get experimental structure ID (lowercase PDB ID)."""
-        pdb_id = row.get("PDB ID", row.get("pdb_id", ""))
-        if pd.notna(pdb_id) and str(pdb_id).strip():
-            return str(pdb_id).strip().lower()
-        return ""
-
-    def get_pred_structure_id(row):
-        """Get predicted structure ID (short_name + _model_0)."""
-        short_name = row.get("short_name", "")
-        if pd.notna(short_name) and str(short_name).strip():
-            return str(short_name).strip() + "_model_0"
-        return ""
-
-    df["exp_structure_id"] = df.apply(get_exp_structure_id, axis=1)
-    df["pred_structure_id"] = df.apply(get_pred_structure_id, axis=1)
-
-    # Summary statistics
-    exp_count = (df["experimentally_determined"] == 1).sum()
-    pred_count = (df["experimentally_determined"] == 0).sum()
-    set_a_count = ((df["experimentally_determined"] == 1) & (df["dataset_split"] == "A")).sum()
-    set_b_count = ((df["experimentally_determined"] == 1) & (df["dataset_split"] == "B")).sum()
-
-    print(f"[INFO] Total entries: {len(df)}")
-    print(f"[INFO] Experimental entries: {exp_count}")
-    print(f"[INFO]   - Set A (pre-Sept 2021): {set_a_count}")
-    print(f"[INFO]   - Set B (post-Sept 2021): {set_b_count}")
-    print(f"[INFO] Novel/undetermined entries: {pred_count}")
-
-    return df
+    """Load ST5 properties and add the operational dataset split metadata."""
+    return load_st5_property_data(property_file, LEGACY_PROPERTY_FILE)
 
 
 def create_structure_mapping(
@@ -255,10 +197,26 @@ def create_structure_mapping(
     hideaki_pred_dir = PROJECT_ROOT / "structures" / "hideaki_pred"
 
     hideaki_count = 0
+    property_by_short = property_df.set_index("short_name", drop=False)
     if hideaki_exp_dir.exists() and hideaki_pred_dir.exists():
         for exp_file in hideaki_exp_dir.glob("*.cif"):
             exp_id = exp_file.stem
             pred_id = exp_id + "_model_0"
+            short_name = hideaki_short_name(exp_id)
+            property_row = (
+                property_by_short.loc[short_name]
+                if short_name in property_by_short.index
+                else None
+            )
+            current_exp_id = (
+                str(property_row["exp_structure_id"]).strip()
+                if property_row is not None
+                else ""
+            )
+            if current_exp_id and current_exp_id in available_set:
+                if pred_id in available_set:
+                    mapping[current_exp_id] = pred_id
+                continue
             if pred_id in available_set:
                 mapping[exp_id] = pred_id
                 hideaki_count += 1
@@ -451,7 +409,20 @@ def create_datasets(
             hideaki_dir = PROJECT_ROOT / "structures" / hideaki_source
             if hideaki_dir.exists():
                 hideaki_ids = [f.stem for f in hideaki_dir.glob("*.cif")]
+                property_by_short = property_df.set_index("short_name", drop=False)
                 for struct_id in hideaki_ids:
+                    short_name = hideaki_short_name(
+                        struct_id.removesuffix("_model_0")
+                    )
+                    if (
+                        hideaki_source == "hideaki_exp"
+                        and short_name in property_by_short.index
+                    ):
+                        current_exp_id = str(
+                            property_by_short.loc[short_name, "exp_structure_id"]
+                        ).strip()
+                        if current_exp_id and current_exp_id in available_set:
+                            continue
                     if struct_id in available_set and struct_id not in content:
                         content.append(struct_id)
                 print(f"[INFO]   Added {len(hideaki_ids)} Hideaki structures from {hideaki_source}")

@@ -10,7 +10,6 @@ and has a gap only at the R1-specific column 5.451.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import sys
 from pathlib import Path
@@ -19,9 +18,13 @@ import pandas as pd
 
 
 ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 PROTOS_SRC = ROOT / "protos" / "src"
 if PROTOS_SRC.exists():
     sys.path.insert(0, str(PROTOS_SRC))
+
+from src.curated_grn_storage import synchronize_runtime_reference
 
 
 TARA_A_TM5_REGISTER = {
@@ -82,53 +85,46 @@ def apply_tara_a_tm5_register(row: pd.Series) -> pd.Series:
     return corrected
 
 
-def _write_json_atomic(path: Path, payload: dict) -> None:
-    temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-    temporary.replace(path)
-
-
 def sync_runtime_reference(candidate: pd.DataFrame) -> str:
-    """Restore validated MOGRN copies after Protos bundle initialization."""
+    """Validate generated TARA rows and restore exact authoritative copies."""
 
-    paths = [
-        ROOT / "data" / "grn" / "reference" / "type_I.csv",
-        ROOT / "data" / "grn" / "reference" / "type_I_opsins.csv",
-        ROOT / "data" / "grn" / "reference" / "type_I_with_tara_domains.csv",
-        ROOT / "opsin_output" / "curated_grn_postprocessed.csv",
-        ROOT / "opsin_output" / "dual_rhodopsins" / "type_I_with_tara_domains.csv",
-    ]
-    paper_copy = ROOT / "opsin_output" / "paper_figures" / "type_I_opsins.csv"
-    if paper_copy.parent.exists():
-        paths.append(paper_copy)
-    for path in paths:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        candidate.to_csv(path)
-
-    digest = hashlib.sha256(paths[0].read_bytes()).hexdigest()
-    manifest_path = ROOT / "data" / "grn" / "manifest.json"
-    if manifest_path.exists():
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        manifest["bundle_version"] = "2026.07.14"
-        manifest["files"]["type_I_opsins.csv"] = digest
-        _write_json_atomic(manifest_path, manifest)
-
-    provenance_path = ROOT / "data" / "grn" / "opsin_provenance.json"
-    if provenance_path.exists():
-        provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
-        provenance["type_I"]["policy"] = (
-            "Retain the curated microbial type-I opsin table, including approved "
-            "manual TARA_A, PsChR2, and continuous HulaCCR1 register corrections."
+    source_path = (
+        ROOT
+        / "protos"
+        / "src"
+        / "protos"
+        / "reference_data"
+        / "grn"
+        / "reference"
+        / "type_I_opsins.csv"
+    )
+    authoritative = pd.read_csv(source_path, index_col=0, dtype=str).fillna("-")
+    normalized = candidate.reindex(
+        index=authoritative.index, columns=authoritative.columns, fill_value="-"
+    ).fillna("-")
+    if not normalized.equals(authoritative):
+        differences = normalized.ne(authoritative)
+        rows = differences.index[differences.any(axis=1)].tolist()
+        raise ValueError(
+            "Generated TARA candidate differs from authoritative ProtOS table "
+            f"for rows: {rows}"
         )
-        provenance["type_I"]["source_table_sha256"] = digest
-        provenance["files"]["type_I_opsins.csv"] = digest
-        _write_json_atomic(provenance_path, provenance)
-    return digest
+    result = synchronize_runtime_reference(source_path, project_root=ROOT)
+    return result["sha256"]
 
 
 def main() -> int:
     output = ROOT / "opsin_output" / "dual_rhodopsins"
-    source_path = ROOT / "type_I.csv"
+    source_path = (
+        ROOT
+        / "protos"
+        / "src"
+        / "protos"
+        / "reference_data"
+        / "grn"
+        / "reference"
+        / "type_I_opsins.csv"
+    )
     annotations_path = output / "dual_domain_grn_annotations_local.csv"
     if not annotations_path.exists():
         raise FileNotFoundError("Run detect_annotate_dual_rhodopsins.py first")

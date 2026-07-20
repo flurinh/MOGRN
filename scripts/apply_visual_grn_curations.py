@@ -144,7 +144,14 @@ def apply_visual_curations(table: pd.DataFrame) -> pd.DataFrame:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--input", type=Path, default=ROOT / "type_I.csv")
+    parser.add_argument(
+        "--input",
+        type=Path,
+        default=(
+            ROOT
+            / "protos/src/protos/reference_data/grn/reference/type_I_opsins.csv"
+        ),
+    )
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
 

@@ -8,6 +8,7 @@
         {
           "id": "TARA_A",
           "label": "A",
+          "curated_reference_id": "TARA_A",
           "ordinal_start": 1,
           "ordinal_end": 329,
           "helices": {
@@ -23,6 +24,7 @@
         {
           "id": "TARA_B",
           "label": "B",
+          "curated_reference_id": "TARA_B",
           "ordinal_start": 330,
           "ordinal_end": 658,
           "helices": {
@@ -43,6 +45,7 @@
         {
           "id": "Tara_RRB_model_0_A",
           "label": "A",
+          "curated_reference_id": "TARA_A",
           "ordinal_start": 1,
           "ordinal_end": 329,
           "helices": {
@@ -58,6 +61,7 @@
         {
           "id": "Tara_RRB_model_0_B",
           "label": "B",
+          "curated_reference_id": "TARA_B",
           "ordinal_start": 330,
           "ordinal_end": 658,
           "helices": {

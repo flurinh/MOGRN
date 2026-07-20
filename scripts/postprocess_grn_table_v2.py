@@ -368,7 +368,7 @@ def main():
     )
     parser.add_argument(
         "--output", "-o",
-        default="opsin_output/curated_grn_postprocessed.csv",
+        default="opsin_output/legacy_grn_postprocessed.csv",
         help="Output postprocessed GRN table CSV"
     )
     args = parser.parse_args()

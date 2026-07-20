@@ -132,7 +132,7 @@ def load_alignment_transformations(cache_dir="opsin_output/cache", global_ref="7
     return transformations
 
 
-def load_grn_table(grn_file="opsin_output/curated_grn_postprocessed.csv"):
+def load_grn_table(grn_file="opsin_output/grn_reference.csv"):
     """Load and parse the GRN table"""
     grn_path = Path(grn_file)
 
@@ -2846,7 +2846,7 @@ def create_interactive_opsin_visualization_extended(
 def create_opsin_visualization_from_workflow(
     cache_dir="opsin_output/cache",
     property_file="property/mo_exp_ST1.csv",
-    grn_file="opsin_output/curated_grn_postprocessed.csv",
+    grn_file="opsin_output/grn_reference.csv",
     output_file="opsin_output/interactive_grn_alignment_3d.html",
     reference_id='7bmh',
     **viz_kwargs
@@ -2940,7 +2940,7 @@ def create_opsin_visualization_from_workflow(
 def create_opsin_visualization_from_workflow_b(
     cache_dir="opsin_output/cache",
     property_file="property/mo_exp_ST1.csv",
-    grn_file="opsin_output/curated_grn_postprocessed.csv",
+    grn_file="opsin_output/grn_reference.csv",
     output_file="opsin_output/interactive_grn_alignment_b.html",
     reference_id='7bmh',
     **viz_kwargs
@@ -3026,7 +3026,7 @@ def create_opsin_visualization_from_workflow_b(
 def create_grid_rotation_movie(
     cache_dir="opsin_output/cache",
     property_file="property/mo_exp_ST1.csv",
-    grn_file="opsin_output/curated_grn_postprocessed.csv",
+    grn_file="opsin_output/grn_reference.csv",
     output_file="opsin_output/paper_figures/09_grid_rotation.mp4",
     reference_id='7bmh',
     cell_size=50.0,
@@ -3289,7 +3289,7 @@ def create_grid_rotation_movie(
 
 def create_msa_rotation_movie(
     cache_dir="opsin_output/cache",
-    grn_file="opsin_output/curated_grn_postprocessed.csv",
+    grn_file="opsin_output/grn_reference.csv",
     output_file="opsin_output/paper_figures/10_MSA_rotation.mp4",
     reference_id='7bmh',
     n_frames=360,

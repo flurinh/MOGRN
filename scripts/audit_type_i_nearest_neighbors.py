@@ -699,7 +699,14 @@ def write_report(output: Path, metadata: dict[str, Any], summary: pd.DataFrame, 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--reference-csv", type=Path, default=PROJECT_ROOT / "type_I.csv")
+    parser.add_argument(
+        "--reference-csv",
+        type=Path,
+        default=(
+            PROJECT_ROOT
+            / "protos/src/protos/reference_data/grn/reference/type_I_opsins.csv"
+        ),
+    )
     parser.add_argument("--output-dir", type=Path, default=PROJECT_ROOT / "opsin_output" / "type_i_nearest_neighbor_audit")
     parser.add_argument("--datasets", nargs="+", default=DEFAULT_DATASETS)
     parser.add_argument("--chain-id", default="A")

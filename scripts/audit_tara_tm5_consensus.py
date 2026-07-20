@@ -55,7 +55,14 @@ HYPOTHESES = build_hypotheses()
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--reference-csv", type=Path, default=ROOT / "type_I.csv")
+    parser.add_argument(
+        "--reference-csv",
+        type=Path,
+        default=(
+            ROOT
+            / "protos/src/protos/reference_data/grn/reference/type_I_opsins.csv"
+        ),
+    )
     parser.add_argument(
         "--output-dir", type=Path,
         default=ROOT / "opsin_output" / "dual_rhodopsins" / "tm5_consensus",
