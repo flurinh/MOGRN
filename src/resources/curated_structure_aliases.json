@@ -1,0 +1,19 @@
+{
+  "aliases": {
+    "8rso": {
+      "reference_id": "7avn",
+      "position_mapping": "sequence_alignment",
+      "reason": "ST5 replacement structure for MacR"
+    },
+    "9j7w": {
+      "reference_id": "knchr_j444_refine5",
+      "position_mapping": "sequence_alignment",
+      "reason": "ST5 experimental structure for KnChR"
+    },
+    "9jws": {
+      "reference_id": "hwmr_model_0",
+      "position_mapping": "sequence_alignment",
+      "reason": "RCSB wild-type replacement for obsolete 8WEW"
+    }
+  }
+}

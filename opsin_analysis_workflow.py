@@ -62,6 +62,7 @@ from src.structure_comparison import (
 from src.helix_analysis import load_and_apply_helix_annotations
 from src.assign_grns import align_and_assign_grn
 from src.lyr_processing import process_lyr_in_processor_data, standardize_retinal_naming
+from src.property_data import load_st5_property_data
 from src.tandem_structure_preprocessing import dataset_signature
 
 
@@ -108,40 +109,13 @@ def load_tandem_structure_manifest() -> Dict[str, Any]:
 
 
 def load_property_data(property_file: Path = None) -> pd.DataFrame:
-    """Load property data from CSV."""
-    import re
+    """Load the authoritative ST5 workbook with workflow split metadata."""
 
-    if property_file is None:
-        property_file = PROPERTY_DIR / "mo_exp_ST1.csv"
-
-    if not property_file.exists():
-        print(f"[WARN] Property file not found: {property_file}")
-        return pd.DataFrame()
-
-    # Read with dtype=str for PDB ID to avoid scientific notation parsing
-    df = pd.read_csv(property_file, dtype={"PDB ID": str})
-    df.columns = df.columns.str.strip()
-
-    # Fix Excel scientific notation issue (e.g., 1E12 -> 1.00E+12)
-    if "PDB ID" in df.columns:
-        def fix_pdb_id(val):
-            if pd.isna(val):
-                return val
-            s = str(val).strip()
-            if "E+" in s.upper() or "E-" in s.upper():
-                match = re.match(r"(\d+)\.?\d*[Ee][+]?(\d+)", s)
-                if match:
-                    return f"{match.group(1)}E{match.group(2)}"
-            return s
-        df["PDB ID"] = df["PDB ID"].apply(fix_pdb_id)
-
-    # Clean up function annotations
-    if "molecular_function" in df.columns:
-        df["molecular_function"] = df["molecular_function"].apply(
-            lambda x: str(x).replace("?", "").strip() if pd.notna(x) else ""
-        )
-
-    return df
+    property_file = property_file or PROJECT_ROOT / "mo_exp_ST5_HEK1.xlsx"
+    return load_st5_property_data(
+        property_file,
+        PROPERTY_DIR / "mo_exp_ST1.csv",
+    )
 
 
 def load_structures_from_datasets(
@@ -677,6 +651,8 @@ def run_opsin_analysis_workflow(
             "tandem_domain_entities": sorted(
                 tandem_manifest.get("entity_parents", {})
             ),
+            "grn_stage": "raw_uncurated_baseline",
+            "curated_application_command": "python apply_curated_grns.py",
         }
 
         with open(output_dir / "analysis_summary.json", "w") as f:

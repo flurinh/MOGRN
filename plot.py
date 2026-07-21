@@ -116,7 +116,7 @@ def get_grn_table_helix_columns() -> set:
     if _GRN_TABLE_COLUMNS is not None:
         return _GRN_TABLE_COLUMNS
 
-    grn_file = OUTPUT_DIR / "curated_grn_postprocessed.csv"
+    grn_file = OUTPUT_DIR / "grn_reference.csv"
     if not grn_file.exists():
         print(f"[WARN] GRN table not found: {grn_file}")
         _GRN_TABLE_COLUMNS = set()
@@ -814,7 +814,7 @@ def main(args=None):
         if residue_table is None or (isinstance(residue_table, pd.DataFrame) and residue_table.empty):
             residue_table = data.get("residue_table")
         if residue_table is None or (isinstance(residue_table, pd.DataFrame) and residue_table.empty):
-            curated_grn_path = input_dir / "curated_grn_postprocessed.csv"
+            curated_grn_path = input_dir / "grn_reference.csv"
             if curated_grn_path.exists():
                 residue_table = pd.read_csv(curated_grn_path, index_col=0, dtype={0: str})
                 residue_table.index = residue_table.index.astype(str)
@@ -895,7 +895,7 @@ def main(args=None):
         if residue_table is None or (isinstance(residue_table, pd.DataFrame) and residue_table.empty):
             residue_table = data.get("residue_table")
         if residue_table is None or (isinstance(residue_table, pd.DataFrame) and residue_table.empty):
-            curated_grn_path = input_dir / "curated_grn_postprocessed.csv"
+            curated_grn_path = input_dir / "grn_reference.csv"
             if curated_grn_path.exists():
                 residue_table = pd.read_csv(curated_grn_path, index_col=0, dtype={0: str})
                 residue_table.index = residue_table.index.astype(str)
@@ -989,7 +989,7 @@ def main(args=None):
             result = create_grid_rotation_movie(
                 cache_dir=str(cache_dir),
                 property_file=str(property_file),
-                grn_file=str(input_dir / "curated_grn_postprocessed.csv"),
+                grn_file=str(input_dir / "grn_reference.csv"),
                 output_file=str(movie_path),
                 reference_id='7bmh',
             )
@@ -1008,7 +1008,7 @@ def main(args=None):
             msa_movie_path = output_dir / "10_MSA_rotation.mp4"
             result = create_msa_rotation_movie(
                 cache_dir=str(cache_dir),
-                grn_file=str(input_dir / "curated_grn_postprocessed.csv"),
+                grn_file=str(input_dir / "grn_reference.csv"),
                 output_file=str(msa_movie_path),
                 reference_id='7bmh',
             )

@@ -1,0 +1,30 @@
+{
+  "aliases": {
+    "B1ChR": "B1ChR2",
+    "CfRhPDE4": "CfRhoPDE",
+    "Chrimson": "CnChR1",
+    "CrHKR1": "HKR1",
+    "HOT75BPR_D97N": "H75BPR_D97N",
+    "LR": "Mac",
+    "MAR": "MacR",
+    "PsChR": "PsChR2",
+    "R2ACR142": "R2ACR",
+    "RhPDE": "SrRhPDE",
+    "TaraRRB": "Tara_RRB",
+    "TaraRRB-R1": "Tara_RRB",
+    "VirR_DTS": "VirR",
+    "ZipACR": "ZipACR_",
+    "cyRII_P7104R": "cyR2_P7104R",
+    "iC++": "iC__"
+  },
+  "external_examples": [
+    "BcHeR",
+    "BPR",
+    "BR",
+    "CfRB",
+    "Chronos",
+    "GPR",
+    "MR",
+    "TfHeR"
+  ]
+}

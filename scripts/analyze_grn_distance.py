@@ -4,7 +4,7 @@ Calculate distances from GRN-annotated residues to retinal.
 
 This script:
 1. Loads structures from the processed structures cache (DataFrame format)
-2. Uses GRN assignments from curated_grn_postprocessed.csv
+2. Uses GRN assignments from the canonical runtime grn_reference.csv
 3. Calculates distances to retinal for each residue:
    - CA distance (alpha carbon to closest retinal atom)
    - Sidechain distance (closest sidechain atom to closest retinal atom)
@@ -163,7 +163,7 @@ def main():
     print("=" * 60)
 
     # Load GRN table
-    grn_file = PROJECT_ROOT / "opsin_output" / "curated_grn_postprocessed.csv"
+    grn_file = PROJECT_ROOT / "opsin_output" / "grn_reference.csv"
     print(f"\n[INFO] Loading GRN table: {grn_file}")
 
     grn_df = pd.read_csv(grn_file, index_col=0, dtype={0: str})

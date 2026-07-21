@@ -3,8 +3,9 @@
 
 Long single chains are screened for a strong non-overlapping internal repeat.
 Detected repeats are split at their inferred repeat period into two virtual
-structures.  The already curated scaffold in ``type_I.csv`` is converted into
-a single-domain reference, after which Protos annotates both virtual domains.
+structures.  The authoritative ProtOS ``type_I_opsins.csv`` scaffold is
+converted into a single-domain reference, after which ProtOS annotates both
+virtual domains.
 """
 
 from __future__ import annotations
@@ -29,6 +30,16 @@ if PROTOS_SRC.exists():
 
 DATASETS = ["mo_exp_A", "mo_exp_B", "mo_pred_exp", "mo_pred_novel"]
 TM_PATTERN = re.compile(r"^([1-7])\.(\d+)$")
+CURATED_REFERENCE = (
+    ROOT
+    / "protos"
+    / "src"
+    / "protos"
+    / "reference_data"
+    / "grn"
+    / "reference"
+    / "type_I_opsins.csv"
+)
 
 
 def residue_table(frame: pd.DataFrame, chain: str) -> pd.DataFrame:
@@ -268,7 +279,7 @@ def tm_bundle_qc(processor: Any, annotations: pd.DataFrame, reference_id: str) -
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--reference-csv", type=Path, default=ROOT / "type_I.csv")
+    parser.add_argument("--reference-csv", type=Path, default=CURATED_REFERENCE)
     parser.add_argument("--output-dir", type=Path, default=ROOT / "opsin_output" / "dual_rhodopsins")
     parser.add_argument("--anchor-id", default="7pl9")
     parser.add_argument("--scan-step", type=int, default=25)

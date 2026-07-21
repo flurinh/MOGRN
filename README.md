@@ -9,15 +9,17 @@
 
 ## Overview
 
-MOGRN aligns experimental and predicted microbial-opsin structures, assigns Generic
-Residue Numbers (GRNs), compares transmembrane bundles, and produces conservation,
-retinal-pocket, RMSD, and interactive structural analyses. The repository contains the
-analysis code and the hand-curated type-I reference table; large structures, metadata,
-caches, and generated figures are distributed separately.
+MOGRN has two connected roles. First, it explains how the microbial-opsin GRN
+system is anchored and runs a reproducible structure-alignment workflow that
+produces a raw, uncurated baseline. Manual scientific curation happens between
+that baseline and the clean ProtOS reference table. Second, it demonstrates the
+finished GRN system by applying that curated table to structures for analysis and
+archival release.
 
-The canonical reference input is [`type_I.csv`](type_I.csv). It currently contains 130
-single-domain entities. Tandem TARA/bestrhodopsin parents are split during preprocessing
-into ordinary A/B entities before the standard pipeline runs.
+The canonical 130-entity reference input is
+`protos/src/protos/reference_data/grn/reference/type_I_opsins.csv` from the pulled
+ProtOS `master` branch. Tandem TARA/bestrhodopsin parents are split during
+preprocessing into ordinary A/B entities before the standard pipeline runs.
 
 ## Installation
 
@@ -37,28 +39,36 @@ For tests, also install `requirements-dev.txt`.
 
 ## Data
 
-Runtime data are intentionally not committed. Restore the associated Zenodo archive
-before running the full workflow:
+Runtime data are intentionally not committed. Restore an older complete runtime
+snapshot, when needed, with:
 
 ```bash
 python download_data.py <ZENODO_RECORD_ID>
 ```
 
-The archive must provide at least:
+That runtime snapshot must provide at least:
 
 - `property/mo_exp_ST1.csv` and `property/helices_grn.json`;
 - source structures and predictions under `structures/`;
 - any Protos runtime data required by the selected release.
 
-`type_I.csv` is the tracked, hand-curated GRN reference. Generated copies under
-`data/grn/reference/` and `opsin_output/` must be treated as derived artifacts.
+Runtime copies under `data/grn/reference/` and `opsin_output/grn_reference.csv`
+are derived byte-for-byte from the authoritative ProtOS table.
 
-Release maintainers can build a deterministic archive with an internal file manifest
-and an external SHA-256 checksum:
+Release maintainers build the canonical ground-truth deposit only after the clean
+workflow has completed:
 
 ```bash
-python create_zenodo_archive.py
+python build_groundtruth_bundle.py
 ```
+
+The builder normalizes `mo_exp_ST5_HEK1.xlsx`, copies the 130-row ProtOS reference
+and GRN config, verifies the function-card CSV against its V2 workbook, rewrites all
+130 exported structures' `grn` columns from the ProtOS table, and validates every
+identifier and residue join. It writes
+`zenodo_upload/grn_opsins_groundtruth.zip` only when all release checks pass.
+Cell-level validation reports are written beside the staging directory when a
+conflict blocks release.
 
 ## Reproduce the analysis
 
@@ -66,11 +76,12 @@ python create_zenodo_archive.py
 # Register structures, split configured tandem parents, and build datasets
 python prepare_data.py --rebuild
 
-# Run structure comparison and GRN assignment
-python opsin_analysis_workflow.py
+# Run structure comparison and raw, provisional GRN assignment without caches.
+python opsin_analysis_workflow.py --skip-prepare --no-cache
 
-# Validate and synchronize TARA/manual reference rows
-python scripts/build_tara_reference_rows.py
+# After manual curation has been incorporated into the pulled ProtOS table,
+# clear provisional labels and persist that table as the final annotation.
+python apply_curated_grns.py
 
 # Generate static and interactive figures
 python plot.py --input-dir opsin_output --output-dir opsin_output/paper_figures
@@ -93,8 +104,8 @@ These files are large, reproducible outputs and are not version-controlled.
 - HulaCCR1 H5 is continuous and has no `5.451` insertion.
 - PsChR2 H1 is continuous from `T2=1.32` through `W33=1.63`.
 
-Manual corrections are encoded by `scripts/apply_visual_grn_curations.py` and guarded by
-regression tests; they are not hidden changes to ProtOS.
+Final manual corrections live in the ProtOS `type_I_opsins.csv` table. MOGRN's
+maintenance scripts audit the TARA/register behavior but cannot replace that source.
 
 ## Tests
 
@@ -112,9 +123,11 @@ TARA reference round-trips, and the curated GRN registers.
 src/                         Core analysis and preprocessing modules
 src/resources/               Curated tandem-domain configuration
 scripts/                     Reproducible audits and maintenance tools
-type_I.csv                   Canonical 130-entity type-I GRN table
+protos/                      ProtOS checkout and canonical type-I GRN table
 prepare_data.py              Structure registration and dataset preparation
 opsin_analysis_workflow.py   Main analysis pipeline
+apply_curated_grns.py        Separate curated ProtOS annotation application
+build_groundtruth_bundle.py  Strict canonical Zenodo bundle builder
 plot.py                      Static and interactive visualization entry point
 docs/                        Small publication-facing documentation assets
 ```

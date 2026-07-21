@@ -9,6 +9,138 @@ import json
 import os
 from pathlib import Path
 
+import pandas as pd
+from Bio.Align import PairwiseAligner
+
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+HELIX_STRUCTURE_ALIASES = (
+    PROJECT_ROOT / "src" / "resources" / "helix_structure_aliases.json"
+)
+STRUCTURE_CACHE = PROJECT_ROOT / "data" / "structure" / "cache"
+
+
+def _load_helix_structure_aliases(path: Path = None) -> dict:
+    """Load structural replacements used to transfer baseline helix labels."""
+
+    path = Path(path or HELIX_STRUCTURE_ALIASES)
+    if not path.is_file():
+        return {}
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    aliases = payload.get("aliases", {})
+    if not isinstance(aliases, dict):
+        raise ValueError("Helix structure aliases must be a JSON object")
+    return aliases
+
+
+def _residue_sequence(frame: pd.DataFrame, chain_id: str = "A"):
+    """Return author positions and sequence for one structure chain."""
+
+    residues = frame.reset_index(drop=True)
+    if "auth_chain_id" in residues.columns:
+        residues = residues.loc[
+            residues["auth_chain_id"].astype(str).eq(str(chain_id))
+        ]
+    if "atom_name" in residues.columns:
+        ca = residues.loc[residues["atom_name"].astype(str).str.upper().eq("CA")]
+        if not ca.empty:
+            residues = ca
+    residues = residues.copy()
+    residues["_auth_seq_numeric"] = pd.to_numeric(
+        residues["auth_seq_id"], errors="coerce"
+    )
+    residues = (
+        residues.dropna(subset=["_auth_seq_numeric"])
+        .sort_values("_auth_seq_numeric")
+        .drop_duplicates("_auth_seq_numeric")
+    )
+    positions = residues["_auth_seq_numeric"].astype(int).tolist()
+    sequence = "".join(
+        residues["res_name1l"].fillna("X").astype(str).str.strip().str.upper()
+    )
+    return positions, sequence
+
+
+def _sequence_position_map(
+    source_frame: pd.DataFrame,
+    target_frame: pd.DataFrame,
+) -> dict[int, int]:
+    """Map source author positions to target positions by global sequence."""
+
+    source_positions, source_sequence = _residue_sequence(source_frame)
+    target_positions, target_sequence = _residue_sequence(target_frame)
+    if not source_sequence or not target_sequence:
+        return {}
+
+    aligner = PairwiseAligner()
+    aligner.mode = "global"
+    aligner.match_score = 2.0
+    aligner.mismatch_score = -1.0
+    aligner.open_gap_score = -3.0
+    aligner.extend_gap_score = -0.5
+    alignment = aligner.align(source_sequence, target_sequence)[0]
+
+    mapping = {}
+    for (source_start, source_end), (target_start, target_end) in zip(
+        alignment.aligned[0], alignment.aligned[1]
+    ):
+        length = min(source_end - source_start, target_end - target_start)
+        for offset in range(length):
+            mapping[source_positions[source_start + offset]] = target_positions[
+                target_start + offset
+            ]
+    return mapping
+
+
+def _add_replacement_helix_definitions(
+    processed_structures: dict,
+    helix_definitions: dict,
+) -> dict:
+    """Transfer raw helix ranges to replacement structures by sequence.
+
+    This is baseline workflow metadata only. It does not read or apply the
+    final curated ProtOS GRN reference.
+    """
+
+    aliases = _load_helix_structure_aliases()
+    lookup = {str(key).lower(): key for key in processed_structures}
+    definition_lookup = {str(key).lower(): key for key in helix_definitions}
+
+    for target_id, spec in aliases.items():
+        target_key = lookup.get(str(target_id).lower())
+        source_id = str(spec.get("source_structure_id", "")).strip()
+        source_definition_key = definition_lookup.get(source_id.lower())
+        if target_key is None or source_definition_key is None:
+            continue
+
+        source_path = STRUCTURE_CACHE / f"{source_id}.pkl"
+        if not source_path.is_file():
+            continue
+        source_frame = pd.read_pickle(source_path)
+        target_structure = processed_structures[target_key]
+        target_frame = target_structure.get("df")
+        if target_frame is None or target_frame.empty:
+            continue
+
+        position_map = _sequence_position_map(source_frame, target_frame)
+        translated = {}
+        for helix_num, bounds in helix_definitions[source_definition_key].items():
+            if not isinstance(bounds, list) or len(bounds) != 2:
+                continue
+            positions = [
+                position_map[position]
+                for position in range(int(bounds[0]), int(bounds[1]) + 1)
+                if position in position_map
+            ]
+            if positions:
+                translated[str(helix_num)] = [min(positions), max(positions)]
+        if len(translated) == 7:
+            helix_definitions[target_key] = translated
+            print(
+                f"[INFO] Transferred helix annotations "
+                f"{source_definition_key} -> {target_key}"
+            )
+    return helix_definitions
 
 def load_helix_definitions(helix_file: str = None) -> dict:
     """
@@ -136,6 +268,10 @@ def load_and_apply_helix_annotations(data_dict: dict, helix_file: str = None) ->
     if not helix_definitions:
         print("[WARNING] No helix definitions loaded. Structures will not have helix annotations.")
         return {'processed_structures': processed_structures}
+
+    helix_definitions = _add_replacement_helix_definitions(
+        processed_structures, helix_definitions
+    )
 
     # Apply annotations
     processed_structures = apply_helix_annotations(processed_structures, helix_definitions)

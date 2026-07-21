@@ -5,7 +5,7 @@ Generate helix boundaries based on GRN positions.
 For each helix, uses manually curated GRN ranges to define the helix
 boundaries in terms of residue numbers:
   H1: 1.39 - 1.56
-  H2: 2.45 - 2.66
+  H2: 2.45 - 2.61
   H3: 3.41 - 3.58
   H4: 4.40 - 4.58
   H5: 5.43 - 5.60
@@ -98,7 +98,7 @@ def main():
         print(f"  H{h}: {h}.{start:02d} - {h}.{end:02d}")
 
     # Load postprocessed GRN table
-    grn_file = PROJECT_ROOT / "opsin_output" / "curated_grn_postprocessed.csv"
+    grn_file = PROJECT_ROOT / "opsin_output" / "grn_reference.csv"
     print(f"\n[INFO] Loading GRN table: {grn_file}")
 
     # Read with index as string to prevent scientific notation parsing (e.g., "1e12" -> 1000000000000)

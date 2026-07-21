@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 
 import pandas as pd
 
@@ -56,28 +55,23 @@ def test_curated_register_remains_an_explicit_structural_audit_hypothesis() -> N
 
 def test_runtime_sync_restores_table_and_checksum_metadata(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(tara_builder, "ROOT", tmp_path)
-    manifest = {
-        "bundle_version": "old",
-        "files": {"type_I_opsins.csv": "old"},
-    }
-    provenance = {
-        "type_I": {"policy": "old", "source_table_sha256": "old"},
-        "files": {"type_I_opsins.csv": "old"},
-    }
-    manifest_path = tmp_path / "data" / "grn" / "manifest.json"
-    provenance_path = tmp_path / "data" / "grn" / "opsin_provenance.json"
-    manifest_path.parent.mkdir(parents=True)
-    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
-    provenance_path.write_text(json.dumps(provenance), encoding="utf-8")
     candidate = pd.DataFrame({"5.451": ["I189", "-"]}, index=["TARA_A", "TARA_B"])
+    source = (
+        tmp_path
+        / "protos"
+        / "src"
+        / "protos"
+        / "reference_data"
+        / "grn"
+        / "reference"
+        / "type_I_opsins.csv"
+    )
+    source.parent.mkdir(parents=True)
+    candidate.to_csv(source)
 
     digest = tara_builder.sync_runtime_reference(candidate)
 
     runtime = tmp_path / "data" / "grn" / "reference" / "type_I_opsins.csv"
     assert digest == hashlib.sha256(runtime.read_bytes()).hexdigest()
     assert pd.read_csv(runtime, index_col=0, dtype=str).fillna("-").equals(candidate)
-    updated_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    updated_provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
-    assert updated_manifest["files"]["type_I_opsins.csv"] == digest
-    assert updated_provenance["type_I"]["source_table_sha256"] == digest
-    assert updated_provenance["files"]["type_I_opsins.csv"] == digest
+    assert runtime.read_bytes() == source.read_bytes()
