@@ -272,6 +272,8 @@ def overwrite_frame_grns(
     reset["grn"] = ""
 
     chain_mask = reset["auth_chain_id"].astype(str) == str(chain_id)
+    if "group" in reset.columns:
+        chain_mask &= reset["group"].astype(str).str.upper().eq("ATOM")
     numeric_ids = pd.to_numeric(reset["auth_seq_id"], errors="coerce")
     atom_column = "atom_name" if "atom_name" in reset.columns else None
     residue_view = reset.loc[chain_mask]

@@ -8,6 +8,7 @@ import gzip
 import hashlib
 import io
 import json
+import pickle
 import re
 import shutil
 import stat
@@ -126,6 +127,30 @@ def source_record(path: Path, *, rows: int | None = None, columns=None) -> dict:
     return record
 
 
+def load_processed_structure_frames(path: Path) -> dict[str, tuple[str, pd.DataFrame]]:
+    """Load the retained workflow cache used for model protein and RET coordinates."""
+
+    with path.open("rb") as handle:
+        payload = pickle.load(handle)
+    processed = payload.get("processed_structures") if isinstance(payload, dict) else None
+    if not isinstance(processed, dict):
+        raise ValueError(f"Processed-structure cache has no structure mapping: {path}")
+
+    frames: dict[str, tuple[str, pd.DataFrame]] = {}
+    for structure_id, structure in processed.items():
+        frame = structure.get("df") if isinstance(structure, dict) else None
+        if not isinstance(frame, pd.DataFrame) or frame.empty:
+            continue
+        key = _identifier(structure_id)
+        if key in frames:
+            raise ValueError(
+                "Processed-structure identifiers collide after normalization: "
+                f"{frames[key][0]} and {structure_id}"
+            )
+        frames[key] = (str(structure_id), frame.copy())
+    return frames
+
+
 def normalize_property(path: Path) -> pd.DataFrame:
     """Normalize the ST5 workbook to the canonical public schema."""
 
@@ -141,13 +166,16 @@ def normalize_property(path: Path) -> pd.DataFrame:
         "resolution",
         "reference_discovery",
         "sequence",
+        "structure_sequence",
         "short_name",
     }
     missing = required.difference(source.columns)
     if missing:
         raise ValueError(f"Property workbook lacks columns: {sorted(missing)}")
 
-    sequence = source["sequence"].map(_sequence)
+    source_sequence = source["sequence"].map(_sequence)
+    structure_sequence = source["structure_sequence"].map(_sequence)
+    sequence = source_sequence.where(source_sequence.ne(""), structure_sequence)
     normalized = pd.DataFrame(
         {
             "short_name": source["short_name"].map(_clean),
@@ -178,7 +206,10 @@ def normalize_property(path: Path) -> pd.DataFrame:
 
 
 def load_function_cards(path: Path) -> pd.DataFrame:
-    cards = pd.read_csv(path, dtype=str, keep_default_na=False)
+    if path.suffix.casefold() in {".xlsx", ".xls"}:
+        cards = pd.read_excel(path, dtype=str, keep_default_na=False)
+    else:
+        cards = pd.read_csv(path, dtype=str, keep_default_na=False)
     if tuple(cards.columns) != FUNCTION_CARD_COLUMNS:
         raise ValueError(f"Unexpected function-card columns: {list(cards.columns)}")
     cards = cards.loc[
@@ -193,51 +224,84 @@ def load_function_cards(path: Path) -> pd.DataFrame:
     return cards
 
 
-def reconcile_function_card_sources(
-    csv_cards: pd.DataFrame,
-    workbook_path: Path,
-) -> dict[str, Any]:
-    """Compare the generated CSV with the non-empty rows in its V2 workbook."""
+def normalize_function_card_examples(
+    cards: pd.DataFrame,
+    property_table: pd.DataFrame,
+    policy_path: Path,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """Normalize workbook examples to ST5 names or declared external examples."""
 
-    workbook = pd.read_excel(workbook_path, dtype=str, keep_default_na=False)
-    if tuple(workbook.columns) != FUNCTION_CARD_COLUMNS:
-        return {
-            "matching": False,
-            "reason": "column_mismatch",
-            "csv_columns": list(csv_cards.columns),
-            "workbook_columns": list(workbook.columns),
-        }
-    workbook = workbook.loc[
-        workbook.apply(lambda row: any(_clean(value) for value in row), axis=1)
-    ].copy()
-    for column in FUNCTION_CARD_COLUMNS:
-        workbook[column] = workbook[column].map(_clean)
-    workbook = workbook.reset_index(drop=True)
-    csv_cards = csv_cards.reset_index(drop=True)
-    differences = []
-    for row_index in range(max(len(csv_cards), len(workbook))):
-        for column in FUNCTION_CARD_COLUMNS:
-            csv_value = (
-                csv_cards.at[row_index, column] if row_index < len(csv_cards) else None
-            )
-            workbook_value = (
-                workbook.at[row_index, column] if row_index < len(workbook) else None
-            )
-            if csv_value != workbook_value:
-                differences.append(
+    policy = json.loads(policy_path.read_text(encoding="utf-8"))
+    aliases = {
+        _clean(source): _clean(target)
+        for source, target in policy.get("aliases", {}).items()
+    }
+    external = {_clean(value) for value in policy.get("external_examples", [])}
+    canonical = set(property_table["short_name"].map(_clean))
+    invalid_targets = sorted(set(aliases.values()).difference(canonical))
+    if invalid_targets:
+        raise ValueError(
+            f"Function-card aliases target names absent from ST5: {invalid_targets}"
+        )
+    overlap = sorted(external.intersection(canonical) | external.intersection(aliases))
+    if overlap:
+        raise ValueError(
+            "Function-card external examples overlap ST5 names or aliases: "
+            f"{overlap}"
+        )
+
+    normalized = cards.copy()
+    transformations = []
+    external_occurrences = []
+    unresolved = []
+    used_aliases = set()
+    used_external = set()
+    for row_index, value in normalized["protein example"].items():
+        examples = [_clean(item) for item in str(value).split("/") if _clean(item)]
+        output_examples = []
+        for example in examples:
+            if example in canonical:
+                canonical_example = example
+            elif example in aliases:
+                canonical_example = aliases[example]
+                used_aliases.add(example)
+                transformations.append(
                     {
-                        "row": row_index + 2,
-                        "column": column,
-                        "csv": csv_value,
-                        "workbook": workbook_value,
+                        "row": int(row_index) + 2,
+                        "source": example,
+                        "canonical": canonical_example,
                     }
                 )
-    return {
-        "matching": not differences,
-        "csv_rows": len(csv_cards),
-        "workbook_nonempty_rows": len(workbook),
-        "cell_differences": differences,
+            elif example in external:
+                canonical_example = example
+                used_external.add(example)
+                external_occurrences.append(
+                    {"row": int(row_index) + 2, "example": example}
+                )
+            else:
+                canonical_example = example
+                unresolved.append(
+                    {"row": int(row_index) + 2, "example": example}
+                )
+            output_examples.append(canonical_example)
+        normalized.at[row_index, "protein example"] = " / ".join(output_examples)
+
+    report = {
+        "source": "single_authoritative_workbook",
+        "matching": not unresolved,
+        "transformations": transformations,
+        "external_examples": sorted(used_external),
+        "external_occurrences": external_occurrences,
+        "unresolved_examples": unresolved,
+        "unused_aliases": sorted(set(aliases).difference(used_aliases)),
+        "unused_external_examples": sorted(external.difference(used_external)),
     }
+    if unresolved:
+        raise ValueError(
+            "Function-card examples are neither ST5 identifiers nor declared "
+            f"external examples: {unresolved}"
+        )
+    return normalized, report
 
 
 def git_revision(path: Path) -> str:
@@ -351,6 +415,8 @@ def validate_structure_reference(
 
     numeric_ids = pd.to_numeric(frame["auth_seq_id"], errors="coerce")
     chain_mask = frame["auth_chain_id"].astype(str).eq("A")
+    if "group" in frame.columns:
+        chain_mask &= frame["group"].astype(str).str.upper().eq("ATOM")
     missing = []
     residue_mismatches = []
     grn_mismatches = []
@@ -409,6 +475,7 @@ def normalize_replacement_positions(
 
     normalized = frame.copy()
     normalized["pdb_auth_seq_id"] = normalized["auth_seq_id"]
+    normalized["auth_seq_id"] = normalized["auth_seq_id"].astype(object)
     chain_mask = normalized["auth_chain_id"].astype(str).eq(str(chain_id))
     numeric_ids = pd.to_numeric(normalized["auth_seq_id"], errors="coerce")
     reverse_map = {observed: source for source, observed in position_map.items()}
@@ -521,8 +588,10 @@ def build_bundle(args: argparse.Namespace) -> dict[str, Any]:
     if canonical_reference.index.has_duplicates:
         raise ValueError("Canonicalized GRN reference has duplicate structure IDs")
     cards = load_function_cards(args.function_cards)
-    function_card_reconciliation = reconcile_function_card_sources(
-        cards, args.function_cards_workbook
+    cards, function_card_reconciliation = normalize_function_card_examples(
+        cards,
+        property_table,
+        args.function_card_examples,
     )
     grn_config = json.loads(args.grn_config.read_text(encoding="utf-8"))
     if not {"standard", "strict"}.issubset(grn_config.get("mo", {})):
@@ -544,10 +613,9 @@ def build_bundle(args: argparse.Namespace) -> dict[str, Any]:
     protos.set_data_path(str(args.data_root))
     processor = StructureProcessor("groundtruth_bundle")
     datasets = ["mo_exp_A", "mo_exp_B", "mo_pred_exp", "mo_pred_novel"]
-    registered = []
-    for dataset in datasets:
-        registered.extend(processor.get_dataset_entities(dataset))
+    registered = processor.list_entities()
     registered_lookup = {identifier.casefold(): identifier for identifier in registered}
+    processed_frames = load_processed_structure_frames(args.processed_structures_cache)
 
     structure_rows = []
     structure_components = {}
@@ -563,6 +631,16 @@ def build_bundle(args: argparse.Namespace) -> dict[str, Any]:
         if frame is None:
             raise ValueError(f"Registered structure failed to load: {stored_id}")
         alias_spec = structure_aliases.get(reference_id)
+        structure_source = "registered_structure"
+        processed_structure_id = None
+        if alias_spec is None and "_model_0" in reference_id.casefold():
+            cached = processed_frames.get(_identifier(reference_id))
+            if cached is None:
+                raise ValueError(
+                    f"No processed workflow structure for predicted row {reference_id}"
+                )
+            processed_structure_id, frame = cached
+            structure_source = "processed_workflow_cache"
         position_map = None
         position_alignment = None
         if alias_spec is not None:
@@ -606,6 +684,8 @@ def build_bundle(args: argparse.Namespace) -> dict[str, Any]:
             "columns": list(STRUCTURE_COLUMNS),
             "provenance": {
                 "registered_structure_id": stored_id,
+                "processed_structure_id": processed_structure_id,
+                "coordinate_source": structure_source,
                 "grn_reference_structure_id": source_reference_id,
                 "canonical_structure_id": reference_id,
                 "grn_policy": "rewritten_from_grn_reference.csv",
@@ -660,6 +740,16 @@ def build_bundle(args: argparse.Namespace) -> dict[str, Any]:
             or (predicted and row["missing_reference_residues"])
         ):
             reconciliation_failures.append(row)
+    predicted_retinal_failures = []
+    for structure_row in structure_rows:
+        if structure_row["structure_type"] != "predicted":
+            continue
+        structure_path = args.output_dir / structure_row["file"]
+        with gzip.open(structure_path, "rt") as handle:
+            structure_frame = pd.read_csv(handle, dtype=str, keep_default_na=False)
+        retinal_atoms = int(structure_frame["res_name3l"].eq("RET").sum())
+        if retinal_atoms == 0:
+            predicted_retinal_failures.append(structure_row["structure_id"])
     validation = {
         "property_rows": len(property_table),
         "grn_reference_rows": len(canonical_reference),
@@ -674,6 +764,7 @@ def build_bundle(args: argparse.Namespace) -> dict[str, Any]:
         "invalid_function_card_grns": invalid_card_grns,
         "function_card_sources": function_card_reconciliation,
         "structure_reference_failures": reconciliation_failures,
+        "predicted_retinal_failures": predicted_retinal_failures,
         "experimental_missing_reference_residues": [
             {
                 "structure_id": row["structure_id"],
@@ -694,6 +785,7 @@ def build_bundle(args: argparse.Namespace) -> dict[str, Any]:
         and not invalid_card_grns
         and function_card_reconciliation["matching"]
         and not reconciliation_failures
+        and not predicted_retinal_failures
     )
     write_json(args.reports_dir / "validation.json", validation)
     write_json(
@@ -761,13 +853,16 @@ def build_bundle(args: argparse.Namespace) -> dict[str, Any]:
                 rows=len(cards),
                 columns=cards.columns,
             ),
-            "function_cards_workbook": source_record(args.function_cards_workbook),
+            "function_card_examples": source_record(args.function_card_examples),
             "structure_registry": {
                 "path": str(args.data_root.resolve()),
                 "datasets": datasets,
                 "mogrn_revision": git_revision(ROOT),
                 "protos_revision": git_revision(ROOT / "protos"),
             },
+            "processed_structure_cache": source_record(
+                args.processed_structures_cache
+            ),
         },
         "canonical_structure_aliases": {
             release_id: {
@@ -802,9 +897,12 @@ def build_bundle(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def parse_args() -> argparse.Namespace:
-    sibling = ROOT.parent / "grn_opsins"
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--property", type=Path, default=ROOT / "mo_exp_ST5_HEK1.xlsx")
+    parser.add_argument(
+        "--property",
+        type=Path,
+        default=ROOT / "raw_data/mo_exp_ST5_HEK1.xlsx",
+    )
     parser.add_argument("--grn-reference", type=Path, default=CURATED_REFERENCE)
     parser.add_argument(
         "--grn-config",
@@ -814,14 +912,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--function-cards",
         type=Path,
-        default=sibling / "backend/data/grn_function_cards_v2.csv",
+        default=ROOT / "raw_data/grn_function_cards_v2_ST1_UTF8_HEK2.xlsx",
     )
     parser.add_argument(
-        "--function-cards-workbook",
+        "--function-card-examples",
         type=Path,
-        default=sibling / "grn_function_cards_v2_ST1_UTF8_HEK2.xlsx",
+        default=ROOT / "raw_data/function_card_examples.json",
     )
     parser.add_argument("--data-root", type=Path, default=ROOT / "data")
+    parser.add_argument(
+        "--processed-structures-cache",
+        type=Path,
+        default=ROOT / "opsin_output/cache/grn_assignment_A.pkl",
+    )
     parser.add_argument(
         "--structure-mapping",
         type=Path,
